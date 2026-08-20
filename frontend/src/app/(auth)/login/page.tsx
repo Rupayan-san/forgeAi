@@ -9,37 +9,37 @@ export default function LoginPage() {
   const { login } = useAuthStore();
 
   return (
-    <div className="w-full max-w-md">
+    <div className="w-full max-w-sm">
       {/* Logo */}
       <div className="text-center mb-8">
-        <Link href="/" className="inline-flex items-center gap-2 mb-4">
-          <div className="w-10 h-10 rounded-xl bg-[#6366F1] flex items-center justify-center">
-            <Zap className="w-5 h-5 text-white" strokeWidth={1.5} />
+        <Link href="/" className="inline-flex items-center gap-2 mb-3">
+          <div className="w-8 h-8 rounded-md bg-[#10b981] flex items-center justify-center">
+            <Zap className="w-4 h-4 text-white" strokeWidth={2} />
           </div>
-          <span className="text-2xl font-bold text-white">Forge</span>
+          <span className="text-lg font-semibold text-[#fafafa] tracking-tight">Forge</span>
         </Link>
-        <p className="text-[rgba(255,255,255,0.7)] text-sm">
+        <p className="text-[#525252] text-[13px]">
           Sign in to access your project memory
         </p>
       </div>
 
       {/* Login Card */}
-      <div className="glass p-8">
-        <h1 className="text-xl font-semibold text-white mb-2">Welcome back</h1>
-        <p className="text-[rgba(255,255,255,0.4)] text-sm mb-6">
+      <div className="surface p-6">
+        <h1 className="text-lg font-semibold text-[#fafafa] mb-1">Welcome back</h1>
+        <p className="text-[#525252] text-[13px] mb-6">
           Connect your GitHub account to get started
         </p>
 
         <button
           onClick={login}
-          className="w-full flex items-center justify-center gap-3 px-6 py-3 bg-white text-black font-medium rounded-xl hover:bg-gray-100 transition-all duration-200 cursor-pointer"
+          className="w-full flex items-center justify-center gap-2.5 px-5 py-2.5 bg-[#fafafa] text-[#050505] text-sm font-medium rounded-md hover:bg-[#e5e5e5] transition-colors cursor-pointer"
         >
-          <GithubIcon className="w-5 h-5" size={20} />
+          <GithubIcon className="w-4 h-4" size={16} />
           Continue with GitHub
         </button>
 
-        <p className="text-[rgba(255,255,255,0.3)] text-xs text-center mt-6">
-          By continuing, you agree to Forge's Terms of Service and Privacy Policy.
+        <p className="text-[#404040] text-[11px] text-center mt-5">
+          By continuing, you agree to Forge&apos;s Terms of Service and Privacy Policy.
         </p>
       </div>
     </div>
