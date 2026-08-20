@@ -18,6 +18,13 @@ export interface IngestionStatus {
   discord_chunks_count: number;
 }
 
+export interface MemberDetail {
+  user_id: string;
+  github_username: string;
+  name: string | null;
+  avatar_url: string | null;
+}
+
 export interface Project {
   project_id: string;
   name: string;
@@ -29,6 +36,10 @@ export interface Project {
   discord_guild_id: string;
   discord_bot_active: boolean;
   ingestion_status: IngestionStatus;
+  join_code: string;
+  join_requests: string[];
+  max_members: number;
+  member_details: MemberDetail[];
   created_at: string;
   updated_at: string;
 }
@@ -37,6 +48,8 @@ export interface ProjectCreate {
   name: string;
   description?: string;
   github_repo_url?: string;
+  discord_guild_id?: string;
+  max_members?: number;
 }
 
 // ========== Chat Types ==========

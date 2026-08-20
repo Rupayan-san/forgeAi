@@ -7,9 +7,12 @@ from cryptography.fernet import Fernet
 from app.core.config import settings
 
 
-# Fernet key for encrypting sensitive tokens (GitHub access tokens)
-# In production, this should be a separate env var
-_fernet_key = Fernet.generate_key()
+import base64
+import hashlib
+
+# Derive a deterministic Fernet key from the SECRET_KEY
+_key_bytes = hashlib.sha256(settings.SECRET_KEY.encode()).digest()
+_fernet_key = base64.urlsafe_b64encode(_key_bytes)
 _fernet = Fernet(_fernet_key)
 
 

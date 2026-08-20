@@ -69,9 +69,9 @@ class QdrantService:
 
         query_filter = Filter(must=conditions) if conditions else None
 
-        results = await self.client.search(
+        results = await self.client.query_points(
             collection_name=collection_name,
-            query_vector=query_vector,
+            query=query_vector,
             query_filter=query_filter,
             limit=limit,
         )
@@ -82,7 +82,7 @@ class QdrantService:
                 "score": hit.score,
                 "payload": hit.payload,
             }
-            for hit in results
+            for hit in results.points
         ]
 
     async def delete_collection(self, collection_name: str) -> None:

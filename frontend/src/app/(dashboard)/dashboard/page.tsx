@@ -12,11 +12,108 @@ import {
   Loader2,
   Folder,
   Trash2,
+  UserPlus,
 } from "lucide-react";
 import { GithubIcon } from "@/components/shared/github-icon";
 import { useProjectStore } from "@/store/use-project-store";
 import { useAuthStore } from "@/store/use-auth-store";
 import type { Project } from "@/types";
+import { api } from "@/lib/api";
+
+function JoinProjectDialog({
+  isOpen,
+  onClose,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+}) {
+  const [joinCode, setJoinCode] = useState("");
+  const [isJoining, setIsJoining] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
+
+  const handleJoin = async () => {
+    if (!joinCode.trim() || joinCode.length !== 6) return;
+    setIsJoining(true);
+    setError("");
+    setSuccess(false);
+    try {
+      await api.post("/projects/join/request", { join_code: joinCode.trim().toUpperCase() });
+      setSuccess(true);
+      setTimeout(() => {
+        setJoinCode("");
+        setSuccess(false);
+        onClose();
+      }, 2000);
+    } catch (err: any) {
+      setError(err.message || "Failed to join project");
+    } finally {
+      setIsJoining(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      {/* Dialog */}
+      <div className="glass relative z-10 w-full max-w-lg mx-4 p-8">
+        <h2 className="text-xl font-semibold text-white mb-1">Join Project</h2>
+        <p className="text-[rgba(255,255,255,0.4)] text-sm mb-6">
+          Enter the 6-character code to request access to a project.
+        </p>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-[rgba(255,255,255,0.5)] mb-1.5">
+              Join Code
+            </label>
+            <input
+              type="text"
+              value={joinCode}
+              onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+              placeholder="e.g. X8F3A2"
+              maxLength={6}
+              className="glass-input w-full px-4 py-2.5 text-sm uppercase tracking-widest font-mono"
+            />
+            {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
+            {success && <p className="text-emerald-400 text-sm mt-2">Request sent successfully!</p>}
+          </div>
+        </div>
+
+        <div className="flex gap-3 mt-8">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2.5 rounded-xl border border-[rgba(255,255,255,0.1)] text-[rgba(255,255,255,0.6)] text-sm hover:bg-[rgba(255,255,255,0.05)] transition-colors cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleJoin}
+            disabled={joinCode.trim().length !== 6 || isJoining || success}
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#10B981] text-white text-sm font-medium hover:bg-[#059669] transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            {isJoining ? (
+              <Loader2 className="w-4 h-4 animate-spin" strokeWidth={1.5} />
+            ) : success ? (
+              "Requested!"
+            ) : (
+              <>
+                <UserPlus className="w-4 h-4" strokeWidth={1.5} />
+                Request to Join
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function CreateProjectDialog({
   isOpen,
@@ -28,6 +125,7 @@ function CreateProjectDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [githubUrl, setGithubUrl] = useState("");
+  const [maxMembers, setMaxMembers] = useState(10);
   const [isCreating, setIsCreating] = useState(false);
   const { createProject } = useProjectStore();
 
@@ -39,10 +137,12 @@ function CreateProjectDialog({
         name: name.trim(),
         description: description.trim(),
         github_repo_url: githubUrl.trim(),
+        max_members: Number(maxMembers),
       });
       setName("");
       setDescription("");
       setGithubUrl("");
+      setMaxMembers(10);
       onClose();
     } catch (err) {
       console.error("Failed to create project:", err);
@@ -101,6 +201,20 @@ function CreateProjectDialog({
               value={githubUrl}
               onChange={(e) => setGithubUrl(e.target.value)}
               placeholder="https://github.com/owner/repo"
+              className="glass-input w-full px-4 py-2.5 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-[rgba(255,255,255,0.5)] mb-1.5">
+              Maximum Members Allowed
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={maxMembers}
+              onChange={(e) => setMaxMembers(Math.max(1, Number(e.target.value)))}
+              placeholder="10"
               className="glass-input w-full px-4 py-2.5 text-sm"
             />
           </div>
@@ -207,6 +321,7 @@ function ProjectCard({ project }: { project: Project }) {
 
 export default function DashboardPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [joinDialogOpen, setJoinDialogOpen] = useState(false);
   const { user } = useAuthStore();
   const { projects, isLoading } = useProjectStore();
 
@@ -222,13 +337,22 @@ export default function DashboardPage() {
             {projects.length} project{projects.length !== 1 ? "s" : ""} in your workspace
           </p>
         </div>
-        <button
-          onClick={() => setDialogOpen(true)}
-          className="flex items-center gap-2 px-5 py-2.5 bg-[#6366F1] text-white text-sm font-medium rounded-xl hover:bg-[#4F46E5] transition-all duration-200 hover:shadow-[0_0_20px_rgba(99,102,241,0.3)] cursor-pointer"
-        >
-          <Plus className="w-4 h-4" strokeWidth={1.5} />
-          New Project
-        </button>
+        <div className="flex gap-3">
+          <button
+            onClick={() => setJoinDialogOpen(true)}
+            className="flex items-center gap-2 px-5 py-2.5 bg-[#10B981] text-white text-sm font-medium rounded-xl hover:bg-[#059669] transition-all duration-200 hover:shadow-[0_0_20px_rgba(16,185,129,0.3)] cursor-pointer"
+          >
+            <UserPlus className="w-4 h-4" strokeWidth={1.5} />
+            Join Project
+          </button>
+          <button
+            onClick={() => setDialogOpen(true)}
+            className="flex items-center gap-2 px-5 py-2.5 bg-[#6366F1] text-white text-sm font-medium rounded-xl hover:bg-[#4F46E5] transition-all duration-200 hover:shadow-[0_0_20px_rgba(99,102,241,0.3)] cursor-pointer"
+          >
+            <Plus className="w-4 h-4" strokeWidth={1.5} />
+            New Project
+          </button>
+        </div>
       </div>
 
       {/* Stats row */}
@@ -309,6 +433,10 @@ export default function DashboardPage() {
       <CreateProjectDialog
         isOpen={dialogOpen}
         onClose={() => setDialogOpen(false)}
+      />
+      <JoinProjectDialog
+        isOpen={joinDialogOpen}
+        onClose={() => setJoinDialogOpen(false)}
       />
     </div>
   );

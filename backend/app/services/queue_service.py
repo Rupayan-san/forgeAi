@@ -15,19 +15,19 @@ decision_queue = Queue("decisions", connection=redis_conn)
 def enqueue_github_job(func, *args, **kwargs) -> dict:
     """Enqueue a job for the GitHub ingestion worker."""
     job = github_queue.enqueue(func, *args, **kwargs)
-    return {"job_id": job.get_id(), "status": job.get_status()}
+    return {"job_id": job.id, "status": job.get_status()}
 
 
 def enqueue_discord_job(func, *args, **kwargs) -> dict:
     """Enqueue a job for the Discord ingestion worker."""
     job = discord_queue.enqueue(func, *args, **kwargs)
-    return {"job_id": job.get_id(), "status": job.get_status()}
+    return {"job_id": job.id, "status": job.get_status()}
 
 
 def enqueue_decision_job(func, *args, **kwargs) -> dict:
     """Enqueue a job for the Decision extraction worker."""
     job = decision_queue.enqueue(func, *args, **kwargs)
-    return {"job_id": job.get_id(), "status": job.get_status()}
+    return {"job_id": job.id, "status": job.get_status()}
 
 
 def get_job_status(job_id: str) -> dict:

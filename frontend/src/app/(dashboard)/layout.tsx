@@ -8,8 +8,12 @@ import { Sidebar } from "@/components/shared/sidebar";
 import { Loader2 } from "lucide-react";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading, checkAuth, token } = useAuthStore();
-  const { fetchProjects } = useProjectStore();
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const isLoading = useAuthStore((state) => state.isLoading);
+  const checkAuth = useAuthStore((state) => state.checkAuth);
+  const token = useAuthStore((state) => state.token);
+  
+  const fetchProjects = useProjectStore((state) => state.fetchProjects);
   const router = useRouter();
   const [ready, setReady] = useState(false);
 
@@ -19,7 +23,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       setReady(true);
     };
     init();
-  }, [checkAuth]);
+  }, []);
 
   useEffect(() => {
     if (ready && !isLoading && !isAuthenticated) {
