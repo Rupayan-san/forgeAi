@@ -114,7 +114,10 @@ class GitHubIngestionService:
             await qdrant_service.ensure_collection(collection_name)
 
             # 3. Fetch repo contents
-            repo: Repository = self.gh.get_repo(project.github_repo_name)
+            repo_name = project.github_repo_name.strip()
+            if repo_name.endswith(".git"):
+                repo_name = repo_name[:-4]
+            repo: Repository = self.gh.get_repo(repo_name)
             contents = repo.get_contents("")
             
             files_to_process = []

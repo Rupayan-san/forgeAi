@@ -28,7 +28,7 @@ export default function LandingPage() {
       {/* 2. Magic Moment Demonstration: Question -> Answer -> Evidence */}
       <MagicMomentDemo />
 
-      {/* 3. Ingestion Timeline: GitHub, Discord, Agora Voice */}
+      {/* 3. Ingestion Timeline: GitHub, Discord, Vector RAG */}
       <StatefulExecutionSection />
 
       {/* 4. Knowledge Graph Relationships & Provenance Citations */}

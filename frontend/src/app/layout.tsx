@@ -11,8 +11,8 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Forge — AI Project Memory",
   description:
-    "Voice-native AI collaboration tool that ingests your GitHub and Discord, builds a knowledge graph, and lets you query your project through conversation.",
-  keywords: ["AI", "project memory", "hackathon", "GitHub", "Discord", "RAG", "voice AI"],
+    "AI project memory for engineering teams that ingests GitHub commits, PRs, and Discord threads, building a living vector knowledge graph with verified source citations.",
+  keywords: ["AI", "project memory", "GitHub", "Discord", "RAG", "Vector Search", "Qdrant", "Knowledge Graph"],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

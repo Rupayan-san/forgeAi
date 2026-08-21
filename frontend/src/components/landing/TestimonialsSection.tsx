@@ -57,7 +57,7 @@ export function TestimonialsSection() {
           >
             <div className="p-8 sm:p-10">
               <blockquote className="text-base sm:text-lg text-zinc-200 leading-relaxed font-normal mb-8 text-center max-w-md mx-auto">
-                &ldquo;Having Agora voice search on top of our Qdrant codebase memory is pure magic. I can speak to our repo while reviewing PRs and get exact commit references in milliseconds.&rdquo;
+                &ldquo;Having sub-second semantic retrieval on top of our Qdrant codebase memory is pure magic. I can query our repo while reviewing PRs and get exact commit references in milliseconds.&rdquo;
               </blockquote>
 
               <div className="flex items-center justify-center gap-3">

@@ -50,8 +50,11 @@ async def create_project(
     # Extract repo name from URL if provided
     github_repo_name = ""
     if project_data.github_repo_url:
-        # Extract "owner/repo" from URL like https://github.com/owner/repo
-        parts = project_data.github_repo_url.rstrip("/").split("/")
+        # Extract "owner/repo" from URL like https://github.com/owner/repo or https://github.com/owner/repo.git
+        clean_url = project_data.github_repo_url.strip().rstrip("/")
+        if clean_url.endswith(".git"):
+            clean_url = clean_url[:-4]
+        parts = clean_url.split("/")
         if len(parts) >= 2:
             github_repo_name = f"{parts[-2]}/{parts[-1]}"
 
@@ -307,7 +310,10 @@ async def update_project(
 
     # Also update github_repo_name if github_repo_url changed
     if "github_repo_url" in update_dict and update_dict["github_repo_url"]:
-        parts = update_dict["github_repo_url"].rstrip("/").split("/")
+        clean_url = update_dict["github_repo_url"].strip().rstrip("/")
+        if clean_url.endswith(".git"):
+            clean_url = clean_url[:-4]
+        parts = clean_url.split("/")
         if len(parts) >= 2:
             update_dict["github_repo_name"] = f"{parts[-2]}/{parts[-1]}"
 

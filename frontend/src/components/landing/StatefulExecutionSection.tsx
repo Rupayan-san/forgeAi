@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { GitBranch, MessageSquare, Mic, Folder, Hash, Search } from "lucide-react";
+import { GitBranch, MessageSquare, Brain, Folder, Hash, Search } from "lucide-react";
 import { GithubIcon } from "@/components/shared/github-icon";
 
 export function StatefulExecutionSection() {
@@ -92,8 +92,8 @@ export function StatefulExecutionSection() {
                     </div>
                     <div className="flex items-center justify-between text-zinc-300">
                       <span className="flex items-center gap-1.5">
-                        <Mic className="w-3 h-3 text-zinc-400" />
-                        <span>Agora Voice AI</span>
+                        <Brain className="w-3 h-3 text-zinc-400" />
+                        <span>Qdrant Vector DB</span>
                       </span>
                       <span className="text-zinc-300 text-[9px] px-1.5 py-0.2 rounded bg-white/5 border border-white/10">READY</span>
                     </div>
@@ -188,12 +188,12 @@ export function StatefulExecutionSection() {
                 <div>
                   <div className="flex items-center gap-2 mb-2">
                     <span className="w-2 h-2 rounded-sm bg-zinc-500" />
-                    <span className="text-xs font-semibold text-white">Voice session: Database migration roadmap</span>
-                    <span className="text-[10px] font-mono text-zinc-500">Agora RTC Voice Assistant</span>
+                    <span className="text-xs font-semibold text-white">Chat query: Database migration roadmap</span>
+                    <span className="text-[10px] font-mono text-zinc-500">FastAPI RAG Inference</span>
                   </div>
                   <div className="relative h-10 bg-black/50 border border-white/10 rounded-lg flex items-center px-4 overflow-hidden">
                     <div className="relative z-10 flex items-center justify-between w-full text-[11px] font-mono text-zinc-400 px-4">
-                      <span className="text-zinc-500">◇ Speech-to-Text</span>
+                      <span className="text-zinc-500">◇ Semantic Search</span>
                       <span className="text-zinc-400">◆ Verified Citations Linked</span>
                     </div>
                   </div>
@@ -245,11 +245,11 @@ export function StatefulExecutionSection() {
             className="space-y-2"
           >
             <div className="flex items-center gap-2 text-white font-semibold text-base">
-              <Mic className="w-4 h-4 text-zinc-300" />
-              <span>Agora Voice-Native AI.</span>
+              <Brain className="w-4 h-4 text-zinc-300" />
+              <span>Grounded Decision Retrieval.</span>
             </div>
             <p className="text-sm text-zinc-400 leading-relaxed">
-              Ask questions hands-free via real-time conversational voice agents with verified source citations.
+              Query architectural choices and rationale via sub-second vector search with verified original source evidence.
             </p>
           </motion.div>
         </div>
