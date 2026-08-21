@@ -63,6 +63,15 @@ class ProjectCreate(BaseModel):
     max_members: int = 10
 
 
+class ProjectUpdate(BaseModel):
+    """Schema for updating an existing project (all fields optional)."""
+    name: str | None = None
+    description: str | None = None
+    github_repo_url: str | None = None
+    discord_guild_id: str | None = None
+    max_members: int | None = None
+
+
 class ProjectResponse(BaseModel):
     """Project response schema."""
     project_id: str
@@ -74,6 +83,7 @@ class ProjectResponse(BaseModel):
     join_requests: list[str]
     max_members: int
     member_details: list[MemberDetail] = Field(default_factory=list)
+    join_request_details: list[MemberDetail] = Field(default_factory=list)
     github_repo_url: str
     github_repo_name: str
     discord_guild_id: str

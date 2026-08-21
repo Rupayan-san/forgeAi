@@ -12,6 +12,8 @@ class UserService:
 
     async def get_by_id(self, user_id: str) -> UserModel | None:
         doc = await self.collection.find_one({"user_id": user_id})
+        if not doc and ObjectId.is_valid(user_id):
+            doc = await self.collection.find_one({"_id": ObjectId(user_id)})
         return UserModel(**doc) if doc else None
 
     async def get_by_github_id(self, github_id: int) -> UserModel | None:

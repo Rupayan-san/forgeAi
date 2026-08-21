@@ -20,45 +20,44 @@ import {
   GitPullRequest,
   GitCommit,
   Users,
-  RefreshCw,
   Trash2,
+  Folder,
+  Check,
+  X,
+  UserPlus,
+  Sparkles,
+  RefreshCw,
 } from "lucide-react";
 import { GithubIcon } from "@/components/shared/github-icon";
+import { DiscordIcon } from "@/components/shared/discord-icon";
+import { DiscordConnectDialog } from "@/components/project/discord-connect-dialog";
 import { useProjectStore } from "@/store/use-project-store";
 import { useAuthStore } from "@/store/use-auth-store";
 import { api } from "@/lib/api";
+import { ActivityItem } from "@/types";
 
-// Mock activity timeline
-const mockActivity = [
-  {
-    type: "commit",
-    title: "feat: add user authentication flow",
-    source: "GitHub",
-    time: "2 hours ago",
-    icon: GitCommit,
-  },
-  {
-    type: "pr",
-    title: "PR #12: Refactor API middleware",
-    source: "GitHub",
-    time: "5 hours ago",
-    icon: GitPullRequest,
-  },
-  {
-    type: "discord",
-    title: "Discussion about database migration strategy",
-    source: "Discord #engineering",
-    time: "1 day ago",
-    icon: Hash,
-  },
-  {
-    type: "decision",
-    title: "Decision: Use PostgreSQL for analytics data",
-    source: "Extracted from PR #8",
-    time: "2 days ago",
-    icon: FileText,
-  },
-];
+function formatRelativeTime(isoString: string): string {
+  if (!isoString) return "Just now";
+  try {
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return "Recently";
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHours = Math.floor(diffMin / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffSec < 45) return "Just now";
+    if (diffMin < 60) return `${diffMin}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays === 1) return "Yesterday";
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  } catch {
+    return "Recently";
+  }
+}
 
 export default function ProjectPage() {
   const params = useParams();
@@ -69,6 +68,12 @@ export default function ProjectPage() {
   const user = useAuthStore((state) => state.user);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
+  const [discordModalOpen, setDiscordModalOpen] = useState(false);
+  const [processingJoinId, setProcessingJoinId] = useState<string | null>(null);
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [isLoadingActivity, setIsLoadingActivity] = useState(true);
+
+  const isOwner = user?.user_id === currentProject?.owner_id;
 
   const handleKick = async (memberId: string) => {
     if (!confirm("Are you sure you want to remove this member from the project?")) return;
@@ -81,9 +86,43 @@ export default function ProjectPage() {
     }
   };
 
+  const handleApproveRequest = async (applicantId: string) => {
+    setProcessingJoinId(applicantId);
+    try {
+      await api.post(`/projects/${projectId}/join/requests/${applicantId}/approve`);
+      await fetchProject(projectId, true);
+    } catch (err) {
+      console.error("Failed to approve join request:", err);
+      alert("Failed to approve join request.");
+    } finally {
+      setProcessingJoinId(null);
+    }
+  };
+
+  const handleRejectRequest = async (applicantId: string) => {
+    setProcessingJoinId(applicantId);
+    try {
+      await api.post(`/projects/${projectId}/join/requests/${applicantId}/reject`);
+      await fetchProject(projectId, true);
+    } catch (err) {
+      console.error("Failed to reject join request:", err);
+      alert("Failed to reject join request.");
+    } finally {
+      setProcessingJoinId(null);
+    }
+  };
+
   useEffect(() => {
     if (projectId) {
       fetchProject(projectId);
+      setIsLoadingActivity(true);
+      api.get<ActivityItem[]>(`/projects/${projectId}/activity`)
+        .then((data) => setActivities(data || []))
+        .catch((err) => {
+          console.error("Failed to fetch project activity:", err);
+          setActivities([]);
+        })
+        .finally(() => setIsLoadingActivity(false));
     }
   }, [projectId, fetchProject]);
 
@@ -103,10 +142,30 @@ export default function ProjectPage() {
     }
   };
 
-  if (!currentProject) {
+  if (isLoading && !currentProject) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <Loader2 className="w-5 h-5 text-[#10b981] animate-spin" strokeWidth={2} />
+      </div>
+    );
+  }
+
+  if (!currentProject || currentProject.project_id !== projectId) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-6">
+        <div className="w-12 h-12 rounded-lg bg-[#141414] border border-[#262626] flex items-center justify-center mb-3">
+          <Folder className="w-6 h-6 text-[#525252]" strokeWidth={1.5} />
+        </div>
+        <h2 className="text-base font-semibold text-[#fafafa] mb-1">Project Not Found</h2>
+        <p className="text-sm text-[#737373] max-w-sm mb-5">
+          This project may not exist, or you might not be a member yet.
+        </p>
+        <Link
+          href="/dashboard"
+          className="px-4 py-2 rounded-md bg-[#10b981] text-white text-xs font-medium hover:bg-[#059669] transition-colors"
+        >
+          Return to Dashboard
+        </Link>
       </div>
     );
   }
@@ -176,6 +235,82 @@ export default function ProjectPage() {
         </div>
       </div>
 
+      {/* Pending Join Requests Banner (Owner only) */}
+      {isOwner && p.join_requests && p.join_requests.length > 0 && (
+        <div className="surface mb-6 p-4 border border-amber-500/30 bg-amber-500/5 rounded-xl">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-md bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                <UserPlus className="w-3.5 h-3.5" />
+              </div>
+              <h2 className="text-[13px] font-semibold text-[#fafafa]">
+                Pending Join Requests ({p.join_requests.length})
+              </h2>
+            </div>
+            <span className="text-[11px] text-amber-400 font-mono">
+              Action Required
+            </span>
+          </div>
+
+          <div className="space-y-2">
+            {(p.join_request_details && p.join_request_details.length > 0
+              ? p.join_request_details
+              : p.join_requests.map((uid) => ({ user_id: uid, github_username: uid, name: "Applicant", avatar_url: null }))
+            ).map((applicant) => (
+              <div
+                key={applicant.user_id}
+                className="flex items-center justify-between p-3 rounded-lg bg-[#0e0e0e] border border-[#222]"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  {applicant.avatar_url ? (
+                    <img
+                      src={applicant.avatar_url}
+                      alt={applicant.github_username || ""}
+                      className="w-7 h-7 rounded-full shrink-0"
+                    />
+                  ) : (
+                    <div className="w-7 h-7 rounded-full bg-[#1a1a1a] flex items-center justify-center text-[10px] text-white shrink-0 font-bold">
+                      {(applicant.github_username || "??").substring(0, 2).toUpperCase()}
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-medium text-[#fafafa] truncate">
+                      {applicant.name || applicant.github_username}
+                    </p>
+                    <p className="text-[11px] text-[#525252] truncate">
+                      @{applicant.github_username || applicant.user_id}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => handleRejectRequest(applicant.user_id)}
+                    disabled={processingJoinId === applicant.user_id}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 text-[12px] font-medium transition-colors disabled:opacity-40 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    Reject
+                  </button>
+                  <button
+                    onClick={() => handleApproveRequest(applicant.user_id)}
+                    disabled={processingJoinId === applicant.user_id}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-[#10b981] hover:bg-[#059669] text-white text-[12px] font-medium transition-colors disabled:opacity-40 cursor-pointer"
+                  >
+                    {processingJoinId === applicant.user_id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Check className="w-3.5 h-3.5" />
+                    )}
+                    Approve
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Ingestion & Team Status Cards */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-6">
         {/* GitHub Ingestion */}
@@ -218,21 +353,33 @@ export default function ProjectPage() {
         <div className="surface p-4">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
-              <Hash className="w-4 h-4 text-[#a3a3a3]" strokeWidth={1.5} />
+              <DiscordIcon className="w-4 h-4 text-[#5865F2]" size={16} />
               <span className="text-[13px] font-medium text-[#fafafa]">Discord</span>
             </div>
-            {p?.ingestion_status?.discord_backfill_complete ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" strokeWidth={1.5} />
-            ) : (
-              <Circle className="w-4 h-4 text-[#404040]" strokeWidth={1.5} />
-            )}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setDiscordModalOpen(true)}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                  p?.discord_guild_id
+                    ? "bg-[#141414] hover:bg-[#1f1f1f] text-[#fafafa] border border-[#262626]"
+                    : "bg-[#5865F2] hover:bg-[#4752C4] text-white"
+                }`}
+              >
+                {p?.discord_guild_id ? "Configure" : "Connect"}
+              </button>
+              {p?.ingestion_status?.discord_backfill_complete ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" strokeWidth={1.5} />
+              ) : (
+                <Circle className={`w-4 h-4 ${p?.discord_guild_id ? "text-emerald-500/70" : "text-[#404040]"}`} strokeWidth={1.5} />
+              )}
+            </div>
           </div>
           <p className="text-[12px] text-[#525252]">
             {p?.ingestion_status?.discord_backfill_complete
               ? `${p?.ingestion_status?.discord_chunks_count || 0} chunks indexed`
               : p?.discord_guild_id
                 ? "Listening for messages..."
-                : "Not connected"}
+                : "Not connected — click Connect to link server"}
           </p>
         </div>
 
@@ -315,15 +462,15 @@ export default function ProjectPage() {
         </div>
         <div className="surface p-4">
           <div className="flex items-center gap-2 mb-1.5">
-            <Hash className="w-3.5 h-3.5 text-[#525252]" strokeWidth={1.5} />
+            <DiscordIcon className="w-3.5 h-3.5 text-[#525252]" size={14} />
             <span className="text-[11px] text-[#525252] uppercase tracking-wider font-medium">Discord</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <div className={`status-dot ${p.ingestion_status.discord_backfill_complete ? "status-dot-success" : "status-dot-idle"}`} />
+            <div className={`status-dot ${p.ingestion_status.discord_backfill_complete ? "status-dot-success" : p.discord_guild_id ? "status-dot-success" : "status-dot-idle"}`} />
             <span className="text-[13px] text-[#a3a3a3]">
               {p.ingestion_status.discord_backfill_complete
                 ? `${p.ingestion_status.discord_chunks_count} indexed`
-                : p.discord_bot_active ? "Pending" : "Not connected"}
+                : p.discord_guild_id ? "Listening" : "Not connected"}
             </span>
           </div>
         </div>
@@ -354,31 +501,64 @@ export default function ProjectPage() {
         {/* Activity timeline */}
         <div className="lg:col-span-1">
           <div className="surface overflow-hidden">
-            <div className="px-4 py-3 border-b border-[#1a1a1a]">
+            <div className="px-4 py-3 border-b border-[#1a1a1a] flex items-center justify-between">
               <h2 className="text-[13px] font-medium text-[#a3a3a3]">Recent Activity</h2>
+              <span className="text-[10px] text-[#525252] font-mono">Live</span>
             </div>
-            <div className="divide-y divide-[#0f0f0f]">
-              {mockActivity.map((item, i) => (
-                <div key={i} className="px-4 py-3 hover:bg-[#0f0f0f] transition-colors">
-                  <div className="flex items-start gap-2.5">
-                    <div className="w-6 h-6 rounded bg-[#111111] border border-[#1a1a1a] flex items-center justify-center mt-0.5 shrink-0">
-                      <item.icon className="w-3 h-3 text-[#525252]" strokeWidth={1.5} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[12px] text-[#a3a3a3] leading-snug truncate">{item.title}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-[10px] text-[#404040]">{item.source}</span>
-                        <span className="text-[10px] text-[#404040]">·</span>
-                        <span className="text-[10px] text-[#404040]">{item.time}</span>
+            {isLoadingActivity ? (
+              <div className="p-6 flex items-center justify-center">
+                <Loader2 className="w-4 h-4 text-[#10b981] animate-spin" />
+              </div>
+            ) : activities.length === 0 ? (
+              <div className="p-6 text-center">
+                <p className="text-[12px] text-[#525252]">No recent activity recorded yet.</p>
+                <p className="text-[11px] text-[#404040] mt-1">Sync GitHub or start chatting to see updates.</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-[#0f0f0f] max-h-[420px] overflow-y-auto">
+                {activities.map((item) => (
+                  <div key={item.id} className="px-4 py-3 hover:bg-[#0f0f0f] transition-colors">
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-6 h-6 rounded bg-[#111111] border border-[#1a1a1a] flex items-center justify-center mt-0.5 shrink-0">
+                        {item.type === "decision" ? (
+                          <FileText className="w-3 h-3 text-purple-400" strokeWidth={1.5} />
+                        ) : item.type === "discord" ? (
+                          <DiscordIcon size={12} className="text-[#5865F2]" />
+                        ) : item.type === "chat" ? (
+                          <MessageSquare className="w-3 h-3 text-blue-400" strokeWidth={1.5} />
+                        ) : item.type === "member" ? (
+                          <Users className="w-3 h-3 text-amber-400" strokeWidth={1.5} />
+                        ) : (
+                          <GithubIcon size={12} className="text-[#10b981]" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[12px] text-[#a3a3a3] leading-snug line-clamp-2" title={item.title}>
+                          {item.title}
+                        </p>
+                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                          <span className="text-[10px] text-[#525252] font-medium">{item.source}</span>
+                          <span className="text-[10px] text-[#333]">·</span>
+                          <span className="text-[10px] text-[#404040]">{formatRelativeTime(item.timestamp)}</span>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Discord Connect Dialog */}
+      <DiscordConnectDialog
+        isOpen={discordModalOpen}
+        onClose={() => setDiscordModalOpen(false)}
+        projectId={projectId}
+        currentGuildId={p?.discord_guild_id}
+        onSuccess={() => fetchProject(projectId, true)}
+      />
     </div>
   );
 }

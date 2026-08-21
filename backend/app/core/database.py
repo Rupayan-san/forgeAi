@@ -38,23 +38,23 @@ async def lifespan(app: FastAPI):
     # Verify MongoDB connection
     try:
         await db_instance.client.admin.command("ping")
-        print(f"✓ Connected to MongoDB: {settings.MONGODB_DB_NAME}")
+        print(f"[Database] Connected to MongoDB: {settings.MONGODB_DB_NAME}")
     except Exception as e:
-        print(f"✗ MongoDB connection failed: {e}")
+        print(f"[Database] MongoDB connection failed: {e}")
     
     # Initialize Qdrant
     db_instance.qdrant = AsyncQdrantClient(
         url=settings.QDRANT_URL,
         api_key=settings.QDRANT_API_KEY,
     )
-    print(f"✓ Connected to Qdrant: {settings.QDRANT_URL}")
+    print(f"[Database] Connected to Qdrant: {settings.QDRANT_URL}")
     
     yield
     
     # Shutdown
     if db_instance.client:
         db_instance.client.close()
-        print("✓ Closed MongoDB connection")
+        print("[Database] Closed MongoDB connection")
     if db_instance.qdrant:
         await db_instance.qdrant.close()
-        print("✓ Closed Qdrant connection")
+        print("[Database] Closed Qdrant connection")

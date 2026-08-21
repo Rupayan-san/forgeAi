@@ -29,7 +29,8 @@ class ApiClient {
     });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(error.detail || "API request failed");
+      console.error(`[ApiClient GET Error] ${res.status} on ${endpoint}:`, error);
+      throw new Error(error.detail || `API GET request failed with status ${res.status}`);
     }
     return res.json();
   }
@@ -42,7 +43,8 @@ class ApiClient {
     });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(error.detail || "API request failed");
+      console.error(`[ApiClient POST Error] ${res.status} on ${endpoint}:`, error);
+      throw new Error(error.detail || `API POST request failed with status ${res.status}`);
     }
     return res.json();
   }
@@ -55,7 +57,8 @@ class ApiClient {
     });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(error.detail || "API request failed");
+      console.error(`[ApiClient PUT Error] ${res.status} on ${endpoint}:`, error);
+      throw new Error(error.detail || `API PUT request failed with status ${res.status}`);
     }
     return res.json();
   }
@@ -67,7 +70,8 @@ class ApiClient {
     });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(error.detail || "API request failed");
+      console.error(`[ApiClient DELETE Error] ${res.status} on ${endpoint}:`, error);
+      throw new Error(error.detail || `API DELETE request failed with status ${res.status}`);
     }
     return res.json();
   }
@@ -80,7 +84,8 @@ class ApiClient {
     });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(error.detail || "Stream request failed");
+      console.error(`[ApiClient STREAM Error] ${res.status} on ${endpoint}:`, error);
+      throw new Error(error.detail || `Stream request failed with status ${res.status}`);
     }
     if (!res.body) {
       throw new Error("No response body for stream");

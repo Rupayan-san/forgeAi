@@ -6,7 +6,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.core.database import get_db, get_qdrant
 from app.api.v1.dependencies import get_current_user
 from app.models.user import UserModel
-from app.models.project import ProjectModel, ProjectCreate, ProjectResponse, IngestionStatus
+from app.models.project import ProjectModel, ProjectCreate, ProjectUpdate, ProjectResponse, IngestionStatus
 from app.services.qdrant_service import QdrantService
 
 from app.services.queue_service import enqueue_github_job
@@ -20,17 +20,59 @@ async def resolve_member_details(db: AsyncIOMotorDatabase, project_doc: dict) ->
     member_ids = project_doc.get("members", [])
     if not member_ids:
         return []
-    cursor = db["users"].find({"user_id": {"$in": member_ids}})
+    cursor = db["users"].find({
+        "$or": [
+            {"user_id": {"$in": member_ids}},
+            {"_id": {"$in": [ObjectId(uid) for uid in member_ids if ObjectId.is_valid(uid)]}}
+        ]
+    })
     users = await cursor.to_list(length=len(member_ids))
-    user_map = {
-        u["user_id"]: {
-            "user_id": u["user_id"],
+    user_map = {}
+    for u in users:
+        uid = u.get("user_id") or str(u.get("_id"))
+        user_map[uid] = {
+            "user_id": uid,
             "github_username": u.get("github_username", ""),
-            "name": u.get("name"),
+            "name": u.get("name") or u.get("github_username", ""),
             "avatar_url": u.get("avatar_url")
-        } for u in users
-    }
-    return [user_map[uid] for uid in member_ids if uid in user_map]
+        }
+    return [user_map.get(uid, {"user_id": uid, "github_username": f"user-{uid[:6]}", "name": "Member", "avatar_url": None}) for uid in member_ids]
+
+
+async def resolve_join_request_details(db: AsyncIOMotorDatabase, project_doc: dict) -> list[dict]:
+    request_ids = project_doc.get("join_requests", [])
+    if not request_ids:
+        return []
+    cursor = db["users"].find({
+        "$or": [
+            {"user_id": {"$in": request_ids}},
+            {"_id": {"$in": [ObjectId(uid) for uid in request_ids if ObjectId.is_valid(uid)]}}
+        ]
+    })
+    users = await cursor.to_list(length=len(request_ids))
+    user_map = {}
+    for u in users:
+        uid = u.get("user_id") or str(u.get("_id"))
+        user_map[uid] = {
+            "user_id": uid,
+            "github_username": u.get("github_username", ""),
+            "name": u.get("name") or u.get("github_username", ""),
+            "avatar_url": u.get("avatar_url")
+        }
+    return [user_map.get(uid, {"user_id": uid, "github_username": f"user-{uid[:6]}", "name": "Applicant", "avatar_url": None}) for uid in request_ids]
+
+
+async def build_project_response(db: AsyncIOMotorDatabase, doc: dict) -> ProjectResponse:
+    member_details = await resolve_member_details(db, doc)
+    join_request_details = await resolve_join_request_details(db, doc)
+    model = ProjectModel(**doc)
+    return ProjectResponse(
+        **{
+            **model.model_dump(),
+            "member_details": member_details,
+            "join_request_details": join_request_details,
+        }
+    )
 
 
 import random
@@ -50,7 +92,6 @@ async def create_project(
     # Extract repo name from URL if provided
     github_repo_name = ""
     if project_data.github_repo_url:
-        # Extract "owner/repo" from URL like https://github.com/owner/repo or https://github.com/owner/repo.git
         clean_url = project_data.github_repo_url.strip().rstrip("/")
         if clean_url.endswith(".git"):
             clean_url = clean_url[:-4]
@@ -69,6 +110,7 @@ async def create_project(
         max_members=project_data.max_members,
         github_repo_url=project_data.github_repo_url,
         github_repo_name=github_repo_name,
+        discord_guild_id=project_data.discord_guild_id.strip() if project_data.discord_guild_id else "",
         qdrant_collection_name=collection_name,
         ingestion_status=IngestionStatus(),
         created_at=datetime.now(timezone.utc),
@@ -86,10 +128,20 @@ async def create_project(
     except Exception as e:
         print(f"Warning: Failed to create Qdrant collection: {e}")
 
-    member_details = await resolve_member_details(db, project.model_dump())
-    return ProjectResponse(**{**project.model_dump(), "member_details": member_details})
+    return await build_project_response(db, project.model_dump())
 
 from pydantic import BaseModel
+
+class ActivityItem(BaseModel):
+    id: str
+    type: str  # "commit" | "pr" | "discord" | "decision" | "chat" | "member" | "sync"
+    title: str
+    description: str = ""
+    author: str = ""
+    source: str = ""
+    timestamp: str = ""
+    url: str = ""
+
 
 class JoinRequestSchema(BaseModel):
     join_code: str
@@ -101,7 +153,10 @@ async def request_join(
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
     """Request to join a project using a join code."""
-    doc = await db["projects"].find_one({"join_code": data.join_code})
+    code = data.join_code.strip().upper()
+    doc = await db["projects"].find_one({"join_code": code})
+    if not doc:
+        doc = await db["projects"].find_one({"join_code": {"$regex": f"^{code}$", "$options": "i"}})
     if not doc:
         raise HTTPException(status_code=404, detail="Project not found or invalid join code")
         
@@ -119,7 +174,50 @@ async def request_join(
         )
     return {"message": "Join request sent"}
 
+@router.get("/{project_id}/join/requests")
+async def get_join_requests(
+    project_id: str,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Get pending join requests for a project (owner only)."""
+    doc = await db["projects"].find_one({"project_id": project_id, "owner_id": current_user.user_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Project not found or not owner")
+
+    project = ProjectModel(**doc)
+    join_request_uids = project.join_requests or []
+    if not join_request_uids:
+        return []
+
+    cursor = db["users"].find({
+        "$or": [
+            {"user_id": {"$in": join_request_uids}},
+            {"_id": {"$in": [ObjectId(uid) for uid in join_request_uids if ObjectId.is_valid(uid)]}}
+        ]
+    })
+    users = await cursor.to_list(length=len(join_request_uids))
+    user_map = {}
+    for u in users:
+        uid = u.get("user_id") or str(u.get("_id"))
+        user_map[uid] = u
+
+    return [
+        {
+            "request_id": uid,
+            "user_id": uid,
+            "user_name": user_map.get(uid, {}).get("name") or user_map.get(uid, {}).get("github_username", "Unknown User"),
+            "github_username": user_map.get(uid, {}).get("github_username", ""),
+            "avatar_url": user_map.get(uid, {}).get("avatar_url", ""),
+            "status": "pending",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        for uid in join_request_uids
+    ]
+
+
 @router.post("/{project_id}/join/approve/{user_id}")
+@router.post("/{project_id}/join/requests/{user_id}/approve")
 async def approve_join(
     project_id: str,
     user_id: str,
@@ -135,31 +233,32 @@ async def approve_join(
     if len(project.members) >= project.max_members:
         raise HTTPException(status_code=400, detail="This project has reached its maximum member limit.")
 
-    if user_id in project.join_requests:
-        await db["projects"].update_one(
-            {"project_id": project_id},
-            {
-                "$pull": {"join_requests": user_id},
-                "$addToSet": {"members": user_id}
-            }
-        )
-        # Create welcome message
-        from app.models.chat import ChatMessageModel
-        welcome_msg = ChatMessageModel(
-            message_id=str(ObjectId()),
-            project_id=project_id,
-            user_id=user_id,
-            role="assistant",
-            content=f"Welcome to the project! Here is a brief description of what we are building:\n\n{project.description or 'No description provided.'}\n\nFeel free to ask me any questions about the repository or our team conversations!",
-            sources=[],
-            interface_type="text",
-            created_at=datetime.now(timezone.utc)
-        )
-        await db["chat_history"].insert_one(welcome_msg.model_dump(by_alias=True))
+    await db["projects"].update_one(
+        {"project_id": project_id},
+        {
+            "$pull": {"join_requests": user_id},
+            "$addToSet": {"members": user_id}
+        }
+    )
+    # Create welcome message
+    from app.models.chat import ChatMessageModel
+    welcome_msg = ChatMessageModel(
+        message_id=str(ObjectId()),
+        project_id=project_id,
+        user_id=user_id,
+        role="assistant",
+        content=f"Welcome to the project! Here is a brief description of what we are building:\n\n{project.description or 'No description provided.'}\n\nFeel free to ask me any questions about the repository or our team conversations!",
+        sources=[],
+        interface_type="text",
+        created_at=datetime.now(timezone.utc)
+    )
+    await db["chat_history"].insert_one(welcome_msg.model_dump(by_alias=True))
         
     return {"message": "User approved"}
 
+
 @router.post("/{project_id}/join/reject/{user_id}")
+@router.post("/{project_id}/join/requests/{user_id}/reject")
 async def reject_join(
     project_id: str,
     user_id: str,
@@ -177,10 +276,13 @@ async def reject_join(
     )
     return {"message": "User rejected"}
 
+
 class InviteSchema(BaseModel):
     github_username: str
 
+
 @router.post("/{project_id}/members/invite")
+@router.post("/{project_id}/invite")
 async def invite_member(
     project_id: str,
     data: InviteSchema,
@@ -267,9 +369,100 @@ async def list_projects(
     cursor = db["projects"].find({"members": current_user.user_id})
     projects = []
     async for doc in cursor:
-        member_details = await resolve_member_details(db, doc)
-        projects.append(ProjectResponse(**{**ProjectModel(**doc).model_dump(), "member_details": member_details}))
+        resp = await build_project_response(db, doc)
+        projects.append(resp)
     return projects
+
+
+@router.get("/activity/all", response_model=list[ActivityItem])
+async def get_all_recent_activity(
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Fetch global recent activity across all projects the user is a member of."""
+    cursor = db["projects"].find({"members": current_user.user_id})
+    user_projects = await cursor.to_list(length=50)
+    if not user_projects:
+        return []
+
+    project_ids = [p["project_id"] for p in user_projects]
+    project_map = {p["project_id"]: p.get("name", "Project") for p in user_projects}
+
+    activities = []
+
+    # 1. Decisions across all user projects
+    dec_cursor = db["decisions"].find({"project_id": {"$in": project_ids}}).sort("timestamp", -1).limit(15)
+    async for dec in dec_cursor:
+        pid = dec.get("project_id", "")
+        pname = project_map.get(pid, "Project")
+        activities.append({
+            "id": f"dec_{dec.get('_id')}",
+            "type": "decision",
+            "title": f"Decision: {dec.get('decision_text', '')[:90]}",
+            "description": dec.get("reasoning", "")[:150],
+            "author": ", ".join(dec.get("participants", [])) or "Forge AI",
+            "source": f"{pname} • Decision",
+            "timestamp": dec.get("timestamp") or dec.get("extracted_at") or datetime.now(timezone.utc).isoformat(),
+            "url": dec.get("source_url", f"/project/{pid}/decisions"),
+        })
+
+    # 2. Group Chat messages across user projects
+    gc_cursor = db["group_chat_history"].find({"project_id": {"$in": project_ids}}).sort("created_at", -1).limit(15)
+    async for msg in gc_cursor:
+        pid = msg.get("project_id", "")
+        pname = project_map.get(pid, "Project")
+        activities.append({
+            "id": f"gc_{msg.get('_id')}",
+            "type": "chat",
+            "title": f"{msg.get('user_name', 'Member')}: {msg.get('content', '')[:80]}",
+            "description": msg.get("content", "")[:150],
+            "author": msg.get("user_name", "Team Member"),
+            "source": f"{pname} • Team Chat",
+            "timestamp": msg.get("created_at", datetime.now(timezone.utc)).isoformat() if isinstance(msg.get("created_at"), datetime) else str(msg.get("created_at")),
+            "url": f"/project/{pid}/group-chat",
+        })
+
+    # 3. Project creations & GitHub sync status
+    for p in user_projects:
+        pid = p.get("project_id", "")
+        pname = p.get("name", "Project")
+        ingestion = p.get("ingestion_status", {})
+        if ingestion.get("github_backfill_complete"):
+            activities.append({
+                "id": f"sync_gh_{pid}",
+                "type": "commit",
+                "title": f"GitHub Indexed: {p.get('github_repo_name') or 'Repository'}",
+                "description": f"{ingestion.get('github_chunks_count', 0)} chunks vectorized",
+                "author": "GitHub Integration",
+                "source": f"{pname} • GitHub Sync",
+                "timestamp": ingestion.get("last_github_sync") or p.get("updated_at", datetime.now(timezone.utc)).isoformat(),
+                "url": p.get("github_repo_url", ""),
+            })
+
+        activities.append({
+            "id": f"proj_{pid}",
+            "type": "member",
+            "title": f"Project '{pname}' created",
+            "description": p.get("description") or "Workspace active",
+            "author": "Project Owner",
+            "source": f"{pname} • Workspace",
+            "timestamp": p.get("created_at", datetime.now(timezone.utc)).isoformat() if isinstance(p.get("created_at"), datetime) else str(p.get("created_at")),
+            "url": f"/project/{pid}",
+        })
+
+    def parse_time(item):
+        ts = item.get("timestamp")
+        if isinstance(ts, datetime):
+            return ts
+        if isinstance(ts, str):
+            try:
+                return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            except Exception:
+                pass
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+    activities.sort(key=parse_time, reverse=True)
+    return [ActivityItem(**item) for item in activities[:25]]
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
@@ -286,14 +479,13 @@ async def get_project(
     if not doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     
-    member_details = await resolve_member_details(db, doc)
-    return ProjectResponse(**{**ProjectModel(**doc).model_dump(), "member_details": member_details})
+    return await build_project_response(db, doc)
 
 
 @router.put("/{project_id}", response_model=ProjectResponse)
 async def update_project(
     project_id: str,
-    update_data: ProjectCreate,
+    update_data: ProjectUpdate,
     current_user: UserModel = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
@@ -323,8 +515,7 @@ async def update_project(
     )
 
     updated_doc = await db["projects"].find_one({"project_id": project_id})
-    member_details = await resolve_member_details(db, updated_doc)
-    return ProjectResponse(**{**ProjectModel(**updated_doc).model_dump(), "member_details": member_details})
+    return await build_project_response(db, updated_doc)
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -379,3 +570,118 @@ async def kick_member(
             {"$pull": {"members": user_id}}
         )
     return {"message": "Member removed"}
+
+
+@router.get("/{project_id}/activity", response_model=list[ActivityItem])
+async def get_project_activity(
+    project_id: str,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Fetch real activity timeline for a project."""
+    doc = await db["projects"].find_one({
+        "project_id": project_id,
+        "members": current_user.user_id,
+    })
+    if not doc:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    activities = []
+
+    # 1. Decisions extracted for this project
+    decisions_cursor = db["decisions"].find({"project_id": project_id}).sort("timestamp", -1).limit(10)
+    async for dec in decisions_cursor:
+        activities.append({
+            "id": f"dec_{dec.get('_id')}",
+            "type": "decision",
+            "title": f"Decision: {dec.get('decision_text', '')[:100]}",
+            "description": dec.get("reasoning", "")[:180],
+            "author": ", ".join(dec.get("participants", [])) or "Forge AI",
+            "source": f"Decision Engine ({dec.get('source_type', 'AI')})",
+            "timestamp": dec.get("timestamp") or dec.get("extracted_at") or datetime.now(timezone.utc).isoformat(),
+            "url": dec.get("source_url", f"/project/{project_id}/decisions"),
+        })
+
+    # 2. Team Group Chat Messages
+    chat_cursor = db["group_chat_history"].find({"project_id": project_id}).sort("created_at", -1).limit(15)
+    async for msg in chat_cursor:
+        activities.append({
+            "id": f"gc_{msg.get('_id')}",
+            "type": "chat",
+            "title": f"{msg.get('user_name', 'Team Member')}: {msg.get('content', '')[:90]}",
+            "description": msg.get("content", "")[:180],
+            "author": msg.get("user_name", "Team Member"),
+            "source": "Team Group Chat",
+            "timestamp": msg.get("created_at", datetime.now(timezone.utc)).isoformat() if isinstance(msg.get("created_at"), datetime) else str(msg.get("created_at")),
+            "url": f"/project/{project_id}/group-chat",
+        })
+
+    # 3. Discord Messages from Qdrant vector memory
+    try:
+        qdrant = get_qdrant()
+        coll_name = doc.get("qdrant_collection_name", f"forge_{project_id}")
+        records, _ = await qdrant.scroll(
+            collection_name=coll_name,
+            scroll_filter={
+                "must": [
+                    {"key": "source_type", "match": {"value": "discord_message"}}
+                ]
+            },
+            limit=10,
+            with_payload=True,
+        )
+        for pt in records:
+            p = pt.payload or {}
+            activities.append({
+                "id": f"disc_{pt.id}",
+                "type": "discord",
+                "title": f"Discord @{p.get('author', 'member')}: {p.get('text', '')[:80]}",
+                "description": p.get("text", "")[:180],
+                "author": p.get("author", "Discord Member"),
+                "source": f"Discord #{p.get('channel', 'general')}",
+                "timestamp": p.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                "url": "",
+            })
+    except Exception:
+        pass
+
+    # 4. GitHub Sync Activity
+    ingestion = doc.get("ingestion_status", {})
+    if ingestion.get("github_backfill_complete"):
+        activities.append({
+            "id": f"sync_gh_{doc.get('project_id')}",
+            "type": "commit",
+            "title": f"GitHub Indexed: {doc.get('github_repo_name') or 'Repository'}",
+            "description": f"{ingestion.get('github_chunks_count', 0)} chunks vectorized and available for AI search",
+            "author": "GitHub Integration",
+            "source": "GitHub Sync",
+            "timestamp": ingestion.get("last_github_sync") or doc.get("updated_at", datetime.now(timezone.utc)).isoformat(),
+            "url": doc.get("github_repo_url", ""),
+        })
+
+    # 5. Project Workspace Creation
+    activities.append({
+        "id": f"proj_{doc.get('project_id')}",
+        "type": "member",
+        "title": f"Project '{doc.get('name')}' created",
+        "description": doc.get("description") or "Project workspace initialized",
+        "author": "Project Owner",
+        "source": "Forge Workspace",
+        "timestamp": doc.get("created_at", datetime.now(timezone.utc)).isoformat() if isinstance(doc.get("created_at"), datetime) else str(doc.get("created_at")),
+        "url": "",
+    })
+
+    # Sort all activities by timestamp descending
+    def parse_time(item):
+        ts = item.get("timestamp")
+        if isinstance(ts, datetime):
+            return ts
+        if isinstance(ts, str):
+            try:
+                return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            except Exception:
+                pass
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+    activities.sort(key=parse_time, reverse=True)
+    return [ActivityItem(**item) for item in activities[:20]]

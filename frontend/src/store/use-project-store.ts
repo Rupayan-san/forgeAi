@@ -12,7 +12,7 @@ interface ProjectState {
   fetchProjects: () => Promise<void>;
   fetchProject: (id: string, silent?: boolean) => Promise<void>;
   setCurrentProject: (project: Project | null) => void;
-  createProject: (data: { name: string; description?: string; github_repo_url?: string; max_members?: number }) => Promise<Project>;
+  createProject: (data: { name: string; description?: string; github_repo_url?: string; discord_guild_id?: string; max_members?: number }) => Promise<Project>;
   deleteProject: (id: string) => Promise<void>;
 }
 

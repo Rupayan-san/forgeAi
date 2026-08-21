@@ -40,6 +40,7 @@ export interface Project {
   join_requests: string[];
   max_members: number;
   member_details: MemberDetail[];
+  join_request_details?: MemberDetail[];
   created_at: string;
   updated_at: string;
 }
@@ -86,6 +87,18 @@ export interface Decision {
   timestamp: string;
   extracted_at: string;
   confidence_score: number;
+}
+
+// ========== Activity Types ==========
+export interface ActivityItem {
+  id: string;
+  type: "commit" | "pr" | "discord" | "decision" | "chat" | "member" | "sync";
+  title: string;
+  description: string;
+  author: string;
+  source: string;
+  timestamp: string;
+  url?: string;
 }
 
 // ========== Auth Types ==========
