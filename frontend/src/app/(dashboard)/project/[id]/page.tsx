@@ -21,12 +21,7 @@ import {
   GitCommit,
   Users,
   Trash2,
-  Folder,
-  Check,
-  X,
-  UserPlus,
-  Sparkles,
-  RefreshCw,
+  Network,
 } from "lucide-react";
 import { GithubIcon } from "@/components/shared/github-icon";
 import { DiscordIcon } from "@/components/shared/discord-icon";
@@ -199,6 +194,12 @@ export default function ProjectPage() {
       icon: FileText,
       title: "Decision Log",
       description: "AI-extracted architectural decisions from your team",
+    },
+    {
+      href: `/project/${projectId}/graph`,
+      icon: Network,
+      title: "Knowledge Graph",
+      description: "Visualize how decisions connect to source files, messages, and people",
     },
   ];
 

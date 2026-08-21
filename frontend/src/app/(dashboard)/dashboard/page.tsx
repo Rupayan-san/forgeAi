@@ -324,7 +324,7 @@ function ProjectRow({ project }: { project: Project }) {
   return (
     <tr
       onClick={() => router.push(`/project/${project.project_id}`)}
-      className="group cursor-pointer hover:bg-[#111111]/70 transition-colors"
+      className="group cursor-pointer"
     >
       <td>
         <div className="flex items-center gap-2.5">
