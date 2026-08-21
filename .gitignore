@@ -14,6 +14,21 @@ __pycache__/
 venv/
 env/
 ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -23,6 +38,10 @@ htmlcov/
 
 # Node.js / Next.js
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 .next/
 out/
 dist/

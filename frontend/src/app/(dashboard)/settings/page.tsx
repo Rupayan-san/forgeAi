@@ -1,7 +1,27 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Loader2, Save, Users, Settings as SettingsIcon, Check, X, UserPlus, Copy } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import {
+  Loader2,
+  Save,
+  Users,
+  Settings as SettingsIcon,
+  Check,
+  X,
+  UserPlus,
+  Copy,
+  User,
+  Key,
+  Shield,
+  Bell,
+  CheckCircle2,
+  Circle,
+  AlertTriangle,
+  Hash,
+  Eye,
+  EyeOff,
+} from "lucide-react";
+import { GithubIcon } from "@/components/shared/github-icon";
 import { useProjectStore } from "@/store/use-project-store";
 import { useAuthStore } from "@/store/use-auth-store";
 import { api } from "@/lib/api";
@@ -20,9 +40,10 @@ export default function SettingsPage() {
   const fetchProject = useProjectStore((state) => state.fetchProject);
   const isLoading = useProjectStore((state) => state.isLoading);
   const user = useAuthStore((state) => state.user);
-  
-  const [activeTab, setActiveTab] = useState<"general" | "team">("general");
 
+  const [activeTab, setActiveTab] = useState<"general" | "team" | "account">("general");
+
+  // General Project form
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [githubRepoUrl, setGithubRepoUrl] = useState("");
@@ -30,13 +51,18 @@ export default function SettingsPage() {
   const [maxMembers, setMaxMembers] = useState(10);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState("");
-  
+
   // Team state
   const [pendingRequests, setPendingRequests] = useState<JoinRequest[]>([]);
   const [inviteUsername, setInviteUsername] = useState("");
   const [isInviting, setIsInviting] = useState(false);
   const [inviteMessage, setInviteMessage] = useState("");
   const [copied, setCopied] = useState(false);
+
+  // Account / API Key
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [apiKeyCopied, setApiKeyCopied] = useState(false);
+  const mockApiKey = "forge_sk_a3f2d1e4b5c6d7e8f921";
 
   // Initialize form when project loads
   useEffect(() => {
@@ -58,18 +84,11 @@ export default function SettingsPage() {
     }
   }, [currentProject, user, activeTab]);
 
-  if (!currentProject) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 className="w-8 h-8 text-[#6366F1] animate-spin" strokeWidth={1.5} />
-      </div>
-    );
-  }
-
-  const isOwner = user?.user_id === currentProject.owner_id;
+  const isOwner = user?.user_id === currentProject?.owner_id;
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentProject) return;
     setIsSaving(true);
     setMessage("");
 
@@ -94,8 +113,8 @@ export default function SettingsPage() {
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inviteUsername.trim()) return;
-    
+    if (!currentProject || !inviteUsername.trim()) return;
+
     setIsInviting(true);
     setInviteMessage("");
     try {
@@ -111,9 +130,10 @@ export default function SettingsPage() {
   };
 
   const handleRequestAction = async (requestId: string, action: "approve" | "reject") => {
+    if (!currentProject) return;
     try {
       await api.post(`/projects/${currentProject.project_id}/join/requests/${requestId}/${action}`);
-      setPendingRequests(prev => prev.filter(r => r.request_id !== requestId));
+      setPendingRequests((prev) => prev.filter((r) => r.request_id !== requestId));
       if (action === "approve") {
         await fetchProject(currentProject.project_id, true);
       }
@@ -123,70 +143,96 @@ export default function SettingsPage() {
   };
 
   const copyJoinCode = () => {
-    if (currentProject.join_code) {
+    if (currentProject?.join_code) {
       navigator.clipboard.writeText(currentProject.join_code);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
   };
 
+  const copyApiKey = () => {
+    navigator.clipboard.writeText(mockApiKey);
+    setApiKeyCopied(true);
+    setTimeout(() => setApiKeyCopied(false), 2000);
+  };
+
   return (
-    <div className="p-8 max-w-4xl">
-      <h1 className="text-2xl font-bold text-white mb-6">Project Settings</h1>
-      
+    <div className="p-6 lg:p-8 max-w-[860px]">
+      {/* Header */}
+      <div className="mb-6">
+        <h1 className="text-lg font-semibold text-[#fafafa] tracking-tight">Settings</h1>
+        <p className="text-[#525252] text-[13px] mt-0.5">
+          Manage project configuration, team members, and user credentials
+        </p>
+      </div>
+
       {/* Tabs */}
-      <div className="flex gap-4 border-b border-[rgba(255,255,255,0.1)] mb-8">
+      <div className="flex gap-2 border-b border-[#1a1a1a] mb-6">
         <button
           onClick={() => setActiveTab("general")}
-          className={`pb-4 px-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${
-            activeTab === "general" 
-              ? "border-[#6366F1] text-white" 
-              : "border-transparent text-[rgba(255,255,255,0.5)] hover:text-white"
+          className={`pb-3 px-3 text-[13px] font-medium transition-colors border-b-2 flex items-center gap-1.5 cursor-pointer ${
+            activeTab === "general"
+              ? "border-[#10b981] text-[#fafafa]"
+              : "border-transparent text-[#525252] hover:text-[#a3a3a3]"
           }`}
         >
-          <SettingsIcon className="w-4 h-4" />
-          General Settings
+          <SettingsIcon className="w-3.5 h-3.5" strokeWidth={1.5} />
+          Project Settings
         </button>
         <button
           onClick={() => setActiveTab("team")}
-          className={`pb-4 px-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${
-            activeTab === "team" 
-              ? "border-[#6366F1] text-white" 
-              : "border-transparent text-[rgba(255,255,255,0.5)] hover:text-white"
+          className={`pb-3 px-3 text-[13px] font-medium transition-colors border-b-2 flex items-center gap-1.5 cursor-pointer ${
+            activeTab === "team"
+              ? "border-[#10b981] text-[#fafafa]"
+              : "border-transparent text-[#525252] hover:text-[#a3a3a3]"
           }`}
         >
-          <Users className="w-4 h-4" />
+          <Users className="w-3.5 h-3.5" strokeWidth={1.5} />
           Team Management
+        </button>
+        <button
+          onClick={() => setActiveTab("account")}
+          className={`pb-3 px-3 text-[13px] font-medium transition-colors border-b-2 flex items-center gap-1.5 cursor-pointer ${
+            activeTab === "account"
+              ? "border-[#10b981] text-[#fafafa]"
+              : "border-transparent text-[#525252] hover:text-[#a3a3a3]"
+          }`}
+        >
+          <User className="w-3.5 h-3.5" strokeWidth={1.5} />
+          Account & Credentials
         </button>
       </div>
 
+      {/* Tab 1: General Settings */}
       {activeTab === "general" && (
-        <form onSubmit={handleSave} className="space-y-6 max-w-3xl">
-          <div className="glass p-6 space-y-6">
-            <h2 className="text-lg font-semibold text-white">General Information</h2>
-            
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-[rgba(255,255,255,0.7)]">Project Name</label>
+        <form onSubmit={handleSave} className="space-y-6">
+          <div className="surface p-5 space-y-4">
+            <h2 className="text-[13px] font-medium text-[#a3a3a3] border-b border-[#1a1a1a] pb-3">
+              General Information
+            </h2>
+
+            <div className="space-y-1.5">
+              <label className="block text-[12px] text-[#525252] font-medium">Project Name</label>
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.1)] rounded-lg px-4 py-2 text-white focus:outline-none focus:border-[#6366F1] transition-colors"
+                className="forge-input w-full px-3 py-2 text-[13px]"
                 required
               />
             </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-[rgba(255,255,255,0.7)]">Description</label>
+            <div className="space-y-1.5">
+              <label className="block text-[12px] text-[#525252] font-medium">Description</label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="w-full bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.1)] rounded-lg px-4 py-2 text-white focus:outline-none focus:border-[#6366F1] transition-colors min-h-[100px]"
+                className="forge-input w-full px-3 py-2 text-[13px] min-h-[80px]"
               />
             </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-[rgba(255,255,255,0.7)]">Maximum Members Allowed</label>
+            <div className="space-y-1.5">
+              <label className="block text-[12px] text-[#525252] font-medium">Maximum Members Allowed</label>
               <input
                 type="number"
                 min={1}
@@ -194,59 +240,61 @@ export default function SettingsPage() {
                 value={maxMembers}
                 onChange={(e) => setMaxMembers(Math.max(1, Number(e.target.value)))}
                 disabled={!isOwner}
-                className="w-full bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.1)] rounded-lg px-4 py-2 text-white focus:outline-none focus:border-[#6366F1] transition-colors disabled:opacity-50"
+                className="forge-input w-full px-3 py-2 text-[13px] disabled:opacity-40"
               />
             </div>
           </div>
 
-          <div className="glass p-6 space-y-6">
-            <h2 className="text-lg font-semibold text-white">Integrations</h2>
-            
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-[rgba(255,255,255,0.7)]">GitHub Repository URL</label>
+          <div className="surface p-5 space-y-4">
+            <h2 className="text-[13px] font-medium text-[#a3a3a3] border-b border-[#1a1a1a] pb-3">
+              Connected Sources
+            </h2>
+
+            <div className="space-y-1.5">
+              <label className="block text-[12px] text-[#525252] font-medium">GitHub Repository URL</label>
               <input
                 type="url"
                 value={githubRepoUrl}
                 onChange={(e) => setGithubRepoUrl(e.target.value)}
                 placeholder="https://github.com/owner/repo"
-                className="w-full bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.1)] rounded-lg px-4 py-2 text-white focus:outline-none focus:border-[#6366F1] transition-colors"
+                className="forge-input w-full px-3 py-2 text-[13px]"
               />
-              <p className="text-xs text-[rgba(255,255,255,0.4)]">
-                Changing this requires running the GitHub Sync again on the overview page.
+              <p className="text-[11px] text-[#525252]">
+                Changing this requires triggering GitHub Sync on the project overview page.
               </p>
             </div>
 
-            <div className="space-y-2 pt-4 border-t border-[rgba(255,255,255,0.05)]">
-              <label className="text-sm font-medium text-[rgba(255,255,255,0.7)]">Discord Server ID (Guild ID)</label>
+            <div className="space-y-1.5 pt-3 border-t border-white/5">
+              <label className="block text-[12px] text-[#525252] font-medium">Discord Server ID (Guild ID)</label>
               <input
                 type="text"
                 value={discordGuildId}
                 onChange={(e) => setDiscordGuildId(e.target.value)}
                 placeholder="e.g. 123456789012345678"
-                className="w-full bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.1)] rounded-lg px-4 py-2 text-white focus:outline-none focus:border-[#6366F1] transition-colors"
+                className="forge-input w-full px-3 py-2 text-[13px]"
               />
-              <p className="text-xs text-[rgba(255,255,255,0.4)]">
-                Enable Developer Mode in Discord, right-click your server name, and select "Copy Server ID".
+              <p className="text-[11px] text-[#525252]">
+                Enable Developer Mode in Discord, right-click your server name, and select &quot;Copy Server ID&quot;.
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <button
               type="submit"
               disabled={isSaving}
-              className="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-[#6366F1] hover:bg-[#4F46E5] text-white font-medium transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-[#10b981] hover:bg-[#059669] text-white text-[13px] font-medium transition-colors disabled:opacity-40 cursor-pointer"
             >
               {isSaving ? (
-                <Loader2 className="w-4 h-4 animate-spin" strokeWidth={1.5} />
+                <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={2} />
               ) : (
-                <Save className="w-4 h-4" strokeWidth={1.5} />
+                <Save className="w-3.5 h-3.5" strokeWidth={1.5} />
               )}
               Save Settings
             </button>
-            
+
             {message && (
-              <span className={`text-sm font-medium ${message.includes("Failed") ? "text-red-400" : "text-emerald-400"}`}>
+              <span className={`text-[12px] font-medium ${message.includes("Failed") ? "text-red-400" : "text-emerald-400"}`}>
                 {message}
               </span>
             )}
@@ -254,55 +302,61 @@ export default function SettingsPage() {
         </form>
       )}
 
+      {/* Tab 2: Team Management */}
       {activeTab === "team" && (
-        <div className="space-y-6 max-w-3xl">
-          {isOwner && (
+        <div className="space-y-6">
+          {isOwner && currentProject && (
             <>
               {/* Join Code */}
-              <div className="glass p-6">
-                <h2 className="text-lg font-semibold text-white mb-4">Project Join Code</h2>
-                <p className="text-sm text-[rgba(255,255,255,0.6)] mb-4">
-                  Share this code with your team members so they can request to join.
+              <div className="surface p-5">
+                <h2 className="text-[13px] font-medium text-[#a3a3a3] mb-1.5">Project Join Code</h2>
+                <p className="text-[12px] text-[#525252] mb-4">
+                  Share this 6-character code with your team members to request access.
                 </p>
-                <div className="flex items-center gap-4 bg-[rgba(0,0,0,0.2)] p-4 rounded-xl border border-[rgba(255,255,255,0.1)] w-fit">
-                  <span className="text-4xl font-mono tracking-widest text-[#6366F1] font-bold">
+                <div className="flex items-center gap-3 bg-[#0d0d0d] p-3 rounded-lg border border-[#1a1a1a] w-fit">
+                  <span className="text-2xl font-mono tracking-widest text-[#10b981] font-bold">
                     {currentProject.join_code || "------"}
                   </span>
-                  <button 
+                  <button
                     onClick={copyJoinCode}
-                    className="p-2 rounded-lg bg-[rgba(255,255,255,0.05)] hover:bg-[rgba(255,255,255,0.1)] transition-colors text-white"
+                    className="p-1.5 rounded bg-[#171717] hover:bg-[#222222] text-[#fafafa] transition-colors cursor-pointer"
                     title="Copy Join Code"
                   >
-                    {copied ? <Check className="w-5 h-5 text-emerald-400" /> : <Copy className="w-5 h-5" />}
+                    {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-[#737373]" />}
                   </button>
                 </div>
               </div>
 
               {/* Pending Requests */}
-              <div className="glass p-6">
-                <h2 className="text-lg font-semibold text-white mb-4">Pending Join Requests</h2>
+              <div className="surface p-5">
+                <h2 className="text-[13px] font-medium text-[#a3a3a3] mb-3">Pending Join Requests</h2>
                 {pendingRequests.length === 0 ? (
-                  <p className="text-sm text-[rgba(255,255,255,0.5)]">No pending requests.</p>
+                  <p className="text-[12px] text-[#525252]">No pending requests at this time.</p>
                 ) : (
-                  <div className="space-y-3">
-                    {pendingRequests.map(req => (
-                      <div key={req.request_id} className="flex items-center justify-between p-3 rounded-lg bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.05)]">
+                  <div className="space-y-2">
+                    {pendingRequests.map((req) => (
+                      <div
+                        key={req.request_id}
+                        className="flex items-center justify-between p-2.5 rounded-md bg-[#0a0a0a] border border-[#1a1a1a]"
+                      >
                         <div>
-                          <p className="text-white font-medium text-sm">{req.user_name}</p>
-                          <p className="text-[rgba(255,255,255,0.5)] text-xs">@{req.github_username}</p>
+                          <p className="text-[#fafafa] font-medium text-[13px]">{req.user_name}</p>
+                          <p className="text-[#525252] text-[11px]">@{req.github_username}</p>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <button 
+                        <div className="flex items-center gap-1.5">
+                          <button
                             onClick={() => handleRequestAction(req.request_id, "approve")}
-                            className="p-1.5 rounded bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-colors"
+                            className="p-1.5 rounded bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors cursor-pointer"
+                            title="Approve"
                           >
-                            <Check className="w-4 h-4" />
+                            <Check className="w-3.5 h-3.5" />
                           </button>
-                          <button 
+                          <button
                             onClick={() => handleRequestAction(req.request_id, "reject")}
-                            className="p-1.5 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
+                            className="p-1.5 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors cursor-pointer"
+                            title="Reject"
                           >
-                            <X className="w-4 h-4" />
+                            <X className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </div>
@@ -312,28 +366,28 @@ export default function SettingsPage() {
               </div>
 
               {/* Invite Member */}
-              <div className="glass p-6">
-                <h2 className="text-lg font-semibold text-white mb-4">Invite Member</h2>
-                <form onSubmit={handleInvite} className="flex flex-col gap-3">
-                  <div className="flex gap-3">
+              <div className="surface p-5">
+                <h2 className="text-[13px] font-medium text-[#a3a3a3] mb-3">Direct Invite</h2>
+                <form onSubmit={handleInvite} className="flex flex-col gap-2.5">
+                  <div className="flex gap-2">
                     <input
                       type="text"
                       value={inviteUsername}
                       onChange={(e) => setInviteUsername(e.target.value)}
-                      placeholder="GitHub Username"
-                      className="flex-1 bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.1)] rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-[#6366F1] transition-colors text-sm"
+                      placeholder="GitHub username"
+                      className="forge-input flex-1 px-3 py-2 text-[13px]"
                     />
                     <button
                       type="submit"
                       disabled={isInviting || !inviteUsername.trim()}
-                      className="flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg bg-[#6366F1] hover:bg-[#4F46E5] text-white font-medium transition-colors disabled:opacity-50 text-sm"
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-[#10b981] hover:bg-[#059669] text-white text-[13px] font-medium transition-colors disabled:opacity-40 cursor-pointer"
                     >
-                      {isInviting ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                      {isInviting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
                       Invite
                     </button>
                   </div>
                   {inviteMessage && (
-                    <span className={`text-sm ${inviteMessage.includes("Failed") ? "text-red-400" : "text-emerald-400"}`}>
+                    <span className={`text-[12px] ${inviteMessage.includes("Failed") ? "text-red-400" : "text-emerald-400"}`}>
                       {inviteMessage}
                     </span>
                   )}
@@ -343,17 +397,118 @@ export default function SettingsPage() {
           )}
 
           {/* Members List */}
-          <div className="glass p-6">
-            <h2 className="text-lg font-semibold text-white mb-4">Project Members ({currentProject.members?.length || 0})</h2>
-            <div className="space-y-2">
-              {currentProject.members?.map(memberId => (
-                <div key={memberId} className="p-3 rounded-lg bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.05)] flex items-center justify-between">
-                  <span className="text-white text-sm font-medium">{memberId}</span>
+          <div className="surface p-5">
+            <h2 className="text-[13px] font-medium text-[#a3a3a3] mb-3">
+              Project Members ({currentProject?.members?.length || 0})
+            </h2>
+            <div className="space-y-1.5">
+              {currentProject?.members?.map((memberId) => (
+                <div
+                  key={memberId}
+                  className="p-2.5 rounded-md bg-[#0a0a0a] border border-[#1a1a1a] flex items-center justify-between"
+                >
+                  <span className="text-[#fafafa] text-[13px] font-medium">{memberId}</span>
                   {memberId === currentProject.owner_id && (
-                    <span className="text-xs bg-[#6366F1]/20 text-[#818CF8] px-2 py-1 rounded">Owner</span>
+                    <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded font-mono font-medium">
+                      Owner
+                    </span>
                   )}
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 3: Account & Credentials */}
+      {activeTab === "account" && (
+        <div className="space-y-6">
+          {/* Profile */}
+          <div className="surface overflow-hidden">
+            <div className="px-5 py-3 border-b border-[#1a1a1a]">
+              <h2 className="text-[13px] font-medium text-[#a3a3a3] flex items-center gap-2">
+                <User className="w-3.5 h-3.5" strokeWidth={1.5} />
+                Profile
+              </h2>
+            </div>
+            <div className="p-5">
+              <div className="flex items-center gap-4">
+                {user?.avatar_url ? (
+                  <img
+                    src={user.avatar_url}
+                    alt={user.name || ""}
+                    className="w-12 h-12 rounded-md border border-[#262626]"
+                  />
+                ) : (
+                  <div className="w-12 h-12 rounded-md bg-[#171717] border border-[#262626] flex items-center justify-center text-sm font-bold text-white">
+                    {(user?.name || "??").substring(0, 2).toUpperCase()}
+                  </div>
+                )}
+                <div>
+                  <p className="text-[14px] font-medium text-[#fafafa]">
+                    {user?.name || "—"}
+                  </p>
+                  <p className="text-[12px] text-[#525252]">@{user?.github_username || "—"}</p>
+                  <p className="text-[11px] text-[#404040] mt-0.5">{user?.email || "No email"}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* API Key section */}
+          <div className="surface overflow-hidden">
+            <div className="px-5 py-3 border-b border-[#1a1a1a]">
+              <h2 className="text-[13px] font-medium text-[#a3a3a3] flex items-center gap-2">
+                <Shield className="w-3.5 h-3.5" strokeWidth={1.5} />
+                API Access
+              </h2>
+            </div>
+            <div className="p-5">
+              <p className="text-[12px] text-[#525252] mb-3">
+                Use this API key to interact with Forge programmatically via HTTP requests.
+              </p>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 forge-input px-3 py-2 text-[12px] font-mono flex items-center">
+                  {showApiKey ? mockApiKey : "forge_sk_••••••••••••••••••••"}
+                </div>
+                <button
+                  onClick={() => setShowApiKey(!showApiKey)}
+                  className="w-8 h-8 rounded-md flex items-center justify-center text-[#525252] hover:text-[#737373] hover:bg-[#111111] transition-colors cursor-pointer"
+                  title={showApiKey ? "Hide Key" : "Show Key"}
+                >
+                  {showApiKey ? <EyeOff className="w-3.5 h-3.5" strokeWidth={1.5} /> : <Eye className="w-3.5 h-3.5" strokeWidth={1.5} />}
+                </button>
+                <button
+                  onClick={copyApiKey}
+                  className="w-8 h-8 rounded-md flex items-center justify-center text-[#525252] hover:text-[#10b981] hover:bg-[#111111] transition-colors cursor-pointer"
+                  title="Copy API Key"
+                >
+                  {apiKeyCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" strokeWidth={1.5} />}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Danger zone */}
+          <div className="surface overflow-hidden border-[rgba(239,68,68,0.2)]">
+            <div className="px-5 py-3 border-b border-[rgba(239,68,68,0.1)]">
+              <h2 className="text-[13px] font-medium text-[#ef4444] flex items-center gap-2">
+                <AlertTriangle className="w-3.5 h-3.5" strokeWidth={1.5} />
+                Danger Zone
+              </h2>
+            </div>
+            <div className="p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[13px] text-[#fafafa]">Delete Account</p>
+                  <p className="text-[11px] text-[#525252]">
+                    Permanently delete your user account and access tokens
+                  </p>
+                </div>
+                <button className="px-3 py-1.5 rounded-md border border-[rgba(239,68,68,0.3)] text-[#ef4444] text-[12px] font-medium hover:bg-[rgba(239,68,68,0.08)] transition-colors cursor-pointer">
+                  Delete
+                </button>
+              </div>
             </div>
           </div>
         </div>

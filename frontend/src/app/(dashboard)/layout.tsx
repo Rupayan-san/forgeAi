@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/use-auth-store";
 import { useProjectStore } from "@/store/use-project-store";
 import { Sidebar } from "@/components/shared/sidebar";
-import { Loader2 } from "lucide-react";
+import { Loader2, Menu, X } from "lucide-react";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -16,6 +16,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const fetchProjects = useProjectStore((state) => state.fetchProjects);
   const router = useRouter();
   const [ready, setReady] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -39,10 +40,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   if (!ready || isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-8 h-8 text-[#6366F1] animate-spin" strokeWidth={1.5} />
-          <p className="text-[rgba(255,255,255,0.5)] text-sm">Loading Forge...</p>
+      <div className="min-h-screen flex items-center justify-center bg-[#050505]">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="w-5 h-5 text-[#10b981] animate-spin" strokeWidth={2} />
+          <p className="text-[#525252] text-[13px]">Loading...</p>
         </div>
       </div>
     );
@@ -53,10 +54,37 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="min-h-screen flex">
-      <Sidebar />
-      {/* Main content area - offset by sidebar width */}
-      <main className="flex-1 ml-[260px] transition-all duration-300">
+    <div className="min-h-screen">
+      {/* Mobile header */}
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 h-14 bg-[#0a0a0a] border-b border-[#1a1a1a] flex items-center px-4">
+        <button
+          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          className="text-[#737373] hover:text-[#fafafa] transition-colors cursor-pointer"
+        >
+          {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+        </button>
+      </div>
+
+      {/* Mobile overlay */}
+      {mobileMenuOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-40 bg-black/60"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* Sidebar - hidden on mobile unless menu open */}
+      <div className={`hidden lg:block`}>
+        <Sidebar />
+      </div>
+      {mobileMenuOpen && (
+        <div className="lg:hidden fixed z-50 top-0 left-0 bottom-0">
+          <Sidebar />
+        </div>
+      )}
+
+      {/* Main content */}
+      <main className="lg:ml-[240px] pt-14 lg:pt-0 min-h-screen">
         {children}
       </main>
     </div>
