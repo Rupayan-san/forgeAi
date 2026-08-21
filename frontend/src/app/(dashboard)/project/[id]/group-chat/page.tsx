@@ -8,7 +8,9 @@ import { useAuthStore } from "@/store/use-auth-store";
 import { useProjectStore } from "@/store/use-project-store";
 
 interface GroupMessage {
-  message_id: string;
+  id?: string;
+  message_id?: string;
+  _id?: string;
   project_id: string;
   user_id: string;
   user_name?: string;
@@ -90,10 +92,11 @@ export default function GroupChatPage() {
               No messages yet. Be the first to say hello!
             </div>
           ) : (
-            messages.map((msg) => {
+            messages.map((msg, i) => {
               const isMine = msg.user_id === user?.user_id;
+              const key = msg.id || msg.message_id || msg._id || `${msg.user_id}-${msg.created_at}-${i}`;
               return (
-                <div key={msg.message_id} className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
+                <div key={key} className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
                   <span className="text-xs text-[rgba(255,255,255,0.4)] mb-1 ml-1">
                     {msg.user_name || msg.user_id} • {new Date(msg.created_at).toLocaleTimeString()}
                   </span>
@@ -141,10 +144,10 @@ export default function GroupChatPage() {
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {/* Active project members */}
-          {currentProject?.member_details?.map((member) => {
+          {currentProject?.member_details?.map((member, idx) => {
             const isOnline = true; // Simulating all online for now
             return (
-              <div key={member.user_id} className="flex items-center gap-3">
+              <div key={member.user_id || idx} className="flex items-center gap-3">
                 <div className="relative">
                   {member.avatar_url ? (
                     <img

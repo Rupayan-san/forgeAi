@@ -1,6 +1,5 @@
-"""Decision extraction service using gpt-4o-mini."""
-
 import json
+import math
 from datetime import datetime, timezone
 from bson import ObjectId
 
@@ -10,7 +9,8 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.core.config import settings
 from app.core.database import get_qdrant
 from app.services.qdrant_service import QdrantService
-from app.models.decision import DecisionModel
+from app.services.embedding_service import EmbeddingService
+from app.models.decision import DecisionModel, DecisionConflictModel
 
 
 EXTRACTION_PROMPT = """Analyze the following project context (code files and Discord conversations) and extract any architectural or product decisions that the team has made.
@@ -38,6 +38,7 @@ class DecisionService:
     def __init__(self):
         self.openai = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         self.model = "gpt-4o-mini"
+        self.embedding_service = EmbeddingService()
 
     async def extract_decisions(
         self,
@@ -125,3 +126,99 @@ class DecisionService:
             saved_decisions.append(decision)
 
         return [d.model_dump() for d in saved_decisions]
+
+    @staticmethod
+    def _cosine_similarity(a: list[float], b: list[float]) -> float:
+        """Plain-python cosine similarity — no extra dependency needed."""
+        dot = sum(x * y for x, y in zip(a, b))
+        norm_a = math.sqrt(sum(x * x for x in a))
+        norm_b = math.sqrt(sum(y * y for y in b))
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return dot / (norm_a * norm_b)
+
+    async def detect_conflicts(
+        self,
+        project_id: str,
+        db: AsyncIOMotorDatabase,
+        similarity_threshold: float = 0.80,
+    ) -> list[dict]:
+        """Find decisions that likely conflict or supersede each other.
+
+        Step 1 (cheap): embed all decision_texts, compare pairwise with cosine
+        similarity. Only pairs above `similarity_threshold` are "candidates" —
+        this avoids an O(n^2) LLM call over every decision pair.
+        Step 2 (expensive, only for candidates): ask gpt-4o-mini to classify
+        the relationship between the two decisions.
+        """
+        cursor = db["decisions"].find({"project_id": project_id}).sort("timestamp", 1)
+        decisions = await cursor.to_list(length=500)
+
+        if len(decisions) < 2:
+            return []
+
+        # Clear old conflict records for this project before recomputing
+        await db["decision_conflicts"].delete_many({"project_id": project_id})
+
+        texts = [d["decision_text"] for d in decisions]
+        embeddings = await self.embedding_service.generate_embeddings(texts)
+
+        # Step 1: cheap pairwise similarity pre-filter (no API calls)
+        candidate_pairs = []
+        for i in range(len(decisions)):
+            for j in range(i + 1, len(decisions)):
+                sim = self._cosine_similarity(embeddings[i], embeddings[j])
+                if sim >= similarity_threshold:
+                    candidate_pairs.append((i, j, sim))
+
+        if not candidate_pairs:
+            return []
+
+        # Step 2: expensive LLM call only for the filtered candidates
+        saved_conflicts = []
+        for i, j, sim in candidate_pairs:
+            dec_a, dec_b = decisions[i], decisions[j]
+            prompt = f"""Decision A (made {dec_a.get('timestamp')}): {dec_a['decision_text']}
+Reasoning A: {dec_a.get('reasoning', 'N/A')}
+
+Decision B (made {dec_b.get('timestamp')}): {dec_b['decision_text']}
+Reasoning B: {dec_b.get('reasoning', 'N/A')}
+
+Do these two decisions conflict, does one supersede the other, or are they unrelated?
+Respond with ONLY valid JSON: {{"relationship": "conflict"|"supersedes"|"unrelated", "explanation": "one sentence why"}}"""
+
+            try:
+                completion = await self.openai.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": "You are a technical analyst comparing project decisions for contradictions. Always respond with valid JSON only."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.1,
+                    max_tokens=200,
+                )
+                raw = completion.choices[0].message.content.strip()
+                if raw.startswith("```"):
+                    raw = raw.split("\n", 1)[1]
+                    raw = raw.rsplit("```", 1)[0]
+                result = json.loads(raw)
+            except (json.JSONDecodeError, Exception) as e:
+                print(f"Conflict check failed for pair ({i},{j}): {e}")
+                continue
+
+            relationship = result.get("relationship", "unrelated")
+            if relationship == "unrelated":
+                continue  # don't store noise, only real relationships
+
+            conflict = DecisionConflictModel(
+                project_id=project_id,
+                decision_id_a=dec_a["decision_id"],
+                decision_id_b=dec_b["decision_id"],
+                relationship=relationship,
+                explanation=result.get("explanation", ""),
+            )
+            await db["decision_conflicts"].insert_one(conflict.model_dump(by_alias=True))
+            saved_conflicts.append(conflict.model_dump())
+
+        return saved_conflicts
+

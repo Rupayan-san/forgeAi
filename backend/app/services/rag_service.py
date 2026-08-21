@@ -50,10 +50,14 @@ class RAGService:
     ) -> dict:
         """Full RAG pipeline: embed query → search Qdrant → generate answer → save history."""
 
+        trace: list[str] = []  # <-- collect real step messages as we go
+
         # 1. Embed the user's question
+        trace.append("Embedding your question with text-embedding-3-small...")
         query_vector = await self.embedding_service.generate_single_embedding(user_message)
 
         # 2. Search Qdrant for relevant chunks
+        trace.append(f"Searching project memory in Qdrant collection '{collection_name}'...")
         qdrant = get_qdrant()
         qdrant_service = QdrantService(qdrant)
         results = await qdrant_service.search(
@@ -61,6 +65,7 @@ class RAGService:
             query_vector=query_vector,
             limit=8,
         )
+        trace.append(f"Retrieved {len(results)} matching chunks")
 
         # 3. Build context string and source citations
         context_parts = []
@@ -101,6 +106,13 @@ class RAGService:
 
         context = "\n\n---\n\n".join(context_parts) if context_parts else "No relevant context found."
 
+        # Real trace: mention which distinct source types were actually pulled in
+        distinct_types = sorted({s.source_type for s in sources})
+        if distinct_types:
+            trace.append(f"Deduped to {len(sources)} unique sources across: {', '.join(distinct_types)}")
+        else:
+            trace.append("No relevant sources found in project memory")
+
         # 4. Save user message to chat history
         user_msg = ChatMessageModel(
             message_id=str(ObjectId()),
@@ -115,6 +127,7 @@ class RAGService:
         await db["chat_history"].insert_one(user_msg.model_dump(by_alias=True))
 
         # 5. Fetch recent chat history for conversational context (last 6 messages)
+        trace.append("Loading recent conversation history...")
         history_cursor = db["chat_history"].find(
             {"project_id": project_id, "user_id": user_id},
             sort=[("created_at", -1)],
@@ -130,6 +143,7 @@ class RAGService:
             messages.append({"role": doc["role"], "content": doc["content"]})
 
         # 6. Call GPT-4o-mini
+        trace.append("Generating grounded answer with gpt-4o-mini...")
         completion = await self.openai.chat.completions.create(
             model=self.generation_model,
             messages=messages,
@@ -137,6 +151,7 @@ class RAGService:
             max_tokens=1024,
         )
         assistant_content = completion.choices[0].message.content
+        trace.append("Answer generated and cited")
 
         # 7. Save assistant response to chat history
         assistant_msg = ChatMessageModel(
@@ -156,4 +171,5 @@ class RAGService:
             "content": assistant_content,
             "sources": [s.model_dump() for s in sources],
             "created_at": assistant_msg.created_at,
+            "trace": trace,
         }
