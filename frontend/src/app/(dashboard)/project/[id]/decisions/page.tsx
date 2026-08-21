@@ -1,86 +1,126 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useParams } from "next/navigation";
 import {
   FileText,
   GitPullRequest,
   GitCommit,
   Hash,
   ChevronDown,
-  ArrowUpRight,
+  ChevronUp,
   Filter,
   List,
   Clock,
   Users,
   AlertCircle,
+  Sparkles,
+  Loader2,
+  FileCode2,
 } from "lucide-react";
+import { api } from "@/lib/api";
 
-// Mock decisions
-const mockDecisions = [
-  {
-    id: "1",
-    decision_text: "Switch from REST to GraphQL for the user service API",
-    reasoning: "REST was causing over-fetching on the mobile dashboard. GraphQL allows clients to request exactly the data they need, reducing payload sizes by ~60%.",
-    alternatives: ["Keep REST with field selection", "Use gRPC for internal services"],
-    participants: ["Sarah Chen", "Alex Kumar", "Jordan Lee"],
-    source_type: "pr" as const,
-    source_id: "47",
-    source_url: "#",
-    timestamp: "2024-03-15T14:30:00Z",
-    confidence: 0.92,
-  },
-  {
-    id: "2",
-    decision_text: "Use PostgreSQL instead of MongoDB for analytics data",
-    reasoning: "Analytics queries require complex joins and aggregations. PostgreSQL's query optimizer handles these patterns significantly better than MongoDB's aggregation pipeline.",
-    alternatives: ["ClickHouse for analytics", "Keep MongoDB with materialized views"],
-    participants: ["Alex Kumar", "Pat Williams"],
-    source_type: "discord" as const,
-    source_id: "eng-456",
-    source_url: "#",
-    timestamp: "2024-03-12T10:15:00Z",
-    confidence: 0.87,
-  },
-  {
-    id: "3",
-    decision_text: "Implement rate limiting at the API gateway level",
-    reasoning: "Per-service rate limiting was inconsistent and hard to manage. Moving to gateway-level gives us centralized control and better visibility into usage patterns.",
-    alternatives: ["Per-service rate limiting", "Client-side throttling only"],
-    participants: ["Jordan Lee", "Sarah Chen"],
-    source_type: "commit" as const,
-    source_id: "a3f2d1e",
-    source_url: "#",
-    timestamp: "2024-03-10T16:45:00Z",
-    confidence: 0.78,
-  },
-  {
-    id: "4",
-    decision_text: "Adopt trunk-based development with short-lived feature branches",
-    reasoning: "Long-lived branches were causing painful merge conflicts. Team agreed to keep branches under 2 days and use feature flags for incomplete work.",
-    alternatives: ["Git Flow", "GitHub Flow with longer branches"],
-    participants: ["Pat Williams", "Alex Kumar", "Sarah Chen", "Jordan Lee"],
-    source_type: "discord" as const,
-    source_id: "eng-789",
-    source_url: "#",
-    timestamp: "2024-03-08T09:00:00Z",
-    confidence: 0.95,
-  },
-];
+interface Decision {
+  decision_id: string;
+  project_id: string;
+  decision_text: string;
+  reasoning: string;
+  alternatives_considered?: string[];
+  participants?: string[];
+  source_type: string;
+  source_id: string;
+  source_url?: string;
+  timestamp?: string;
+  extracted_at?: string;
+  confidence_score?: number;
+}
 
-const sourceTypeConfig = {
+const sourceTypeConfig: Record<string, { icon: any; label: string; color: string }> = {
   pr: { icon: GitPullRequest, label: "Pull Request", color: "#3b82f6" },
+  github_pr: { icon: GitPullRequest, label: "Pull Request", color: "#3b82f6" },
   commit: { icon: GitCommit, label: "Commit", color: "#10b981" },
+  github_commit: { icon: GitCommit, label: "Commit", color: "#10b981" },
   discord: { icon: Hash, label: "Discord", color: "#a855f7" },
+  discord_message: { icon: Hash, label: "Discord", color: "#a855f7" },
+  github_file: { icon: FileCode2, label: "File", color: "#6366f1" },
   issue: { icon: AlertCircle, label: "Issue", color: "#f59e0b" },
 };
 
 export default function DecisionsPage() {
+  const params = useParams();
+  const projectId = params.id as string;
+
+  const [decisions, setDecisions] = useState<Decision[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [extractMessage, setExtractMessage] = useState("");
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [view, setView] = useState<"timeline" | "table">("timeline");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
 
-  const filtered = sourceFilter === "all"
-    ? mockDecisions
-    : mockDecisions.filter((d) => d.source_type === sourceFilter);
+  const fetchDecisions = async () => {
+    try {
+      const data = await api.get<Decision[]>(
+        `/projects/${projectId}/decisions`
+      );
+      setDecisions(data || []);
+    } catch (err) {
+      console.error("Failed to load decisions", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (projectId) {
+      fetchDecisions();
+    }
+  }, [projectId]);
+
+  const handleExtract = async () => {
+    setIsExtracting(true);
+    setExtractMessage("");
+    try {
+      const result = await api.post<{ message: string; count: number }>(
+        `/projects/${projectId}/decisions/extract`
+      );
+      setExtractMessage(result.message || "Decisions extracted successfully");
+      await fetchDecisions();
+    } catch (err) {
+      console.error(err);
+      setExtractMessage("Failed to extract decisions.");
+    } finally {
+      setIsExtracting(false);
+      setTimeout(() => setExtractMessage(""), 5000);
+    }
+  };
+
+  const toggleExpand = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const filtered = decisions.filter((d) => {
+    if (sourceFilter === "all") return true;
+    const norm = (d.source_type || "").toLowerCase();
+    if (sourceFilter === "pr") return norm.includes("pr");
+    if (sourceFilter === "commit") return norm.includes("commit");
+    if (sourceFilter === "discord") return norm.includes("discord");
+    return norm === sourceFilter;
+  });
+
+  const getSourceConfig = (type: string) => {
+    const key = (type || "").toLowerCase();
+    return sourceTypeConfig[key] || {
+      icon: FileText,
+      label: type || "Document",
+      color: "#737373",
+    };
+  };
 
   return (
     <div className="p-6 lg:p-8 max-w-[1200px]">
@@ -89,14 +129,35 @@ export default function DecisionsPage() {
         <div>
           <h1 className="text-lg font-semibold text-[#fafafa] tracking-tight">Decision Log</h1>
           <p className="text-[#525252] text-[13px] mt-0.5">
-            AI-extracted architectural and product decisions from your team
+            AI-extracted architectural and product decisions with verified sources
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          {extractMessage && (
+            <span className="text-[12px] text-[#10b981] font-mono animate-pulse">
+              {extractMessage}
+            </span>
+          )}
+
+          {/* Extract Button */}
+          <button
+            onClick={handleExtract}
+            disabled={isExtracting}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[#10b981] text-white text-[13px] font-medium hover:bg-[#059669] transition-colors disabled:opacity-40 cursor-pointer"
+          >
+            {isExtracting ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={2} />
+            ) : (
+              <Sparkles className="w-3.5 h-3.5" strokeWidth={2} />
+            )}
+            Extract Decisions
+          </button>
+
           {/* View toggle */}
           <div className="flex items-center rounded-md border border-[#1a1a1a] overflow-hidden">
             <button
               onClick={() => setView("timeline")}
+              title="Timeline view"
               className={`px-2.5 py-1.5 text-[12px] transition-colors cursor-pointer ${
                 view === "timeline"
                   ? "bg-[#111111] text-[#fafafa]"
@@ -107,6 +168,7 @@ export default function DecisionsPage() {
             </button>
             <button
               onClick={() => setView("table")}
+              title="Table view"
               className={`px-2.5 py-1.5 text-[12px] transition-colors cursor-pointer ${
                 view === "table"
                   ? "bg-[#111111] text-[#fafafa]"
@@ -122,35 +184,61 @@ export default function DecisionsPage() {
       {/* Filters */}
       <div className="flex items-center gap-2 mb-5">
         <Filter className="w-3.5 h-3.5 text-[#525252]" strokeWidth={1.5} />
-        {["all", "pr", "commit", "discord"].map((type) => (
+        {[
+          { key: "all", label: "All" },
+          { key: "pr", label: "Pull Requests" },
+          { key: "commit", label: "Commits" },
+          { key: "discord", label: "Discord" },
+        ].map(({ key, label }) => (
           <button
-            key={type}
-            onClick={() => setSourceFilter(type)}
+            key={key}
+            onClick={() => setSourceFilter(key)}
             className={`px-2.5 py-1 rounded-md text-[12px] transition-colors cursor-pointer ${
-              sourceFilter === type
+              sourceFilter === key
                 ? "bg-[#111111] text-[#fafafa] border border-[#262626]"
                 : "text-[#525252] hover:text-[#737373] border border-transparent"
             }`}
           >
-            {type === "all" ? "All" : sourceTypeConfig[type as keyof typeof sourceTypeConfig]?.label}
+            {label}
           </button>
         ))}
         <span className="text-[11px] text-[#404040] ml-2">{filtered.length} decisions</span>
       </div>
 
-      {/* Timeline view */}
-      {view === "timeline" ? (
+      {isLoading ? (
+        <div className="flex justify-center py-20">
+          <Loader2 className="w-5 h-5 text-[#10b981] animate-spin" strokeWidth={2} />
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="surface p-12 text-center">
+          <FileText className="w-8 h-8 text-[#525252] mx-auto mb-3" strokeWidth={1.5} />
+          <h3 className="text-[14px] font-medium text-[#fafafa] mb-1">No decisions found</h3>
+          <p className="text-[#525252] text-[12px] max-w-sm mx-auto mb-4">
+            Click &ldquo;Extract Decisions&rdquo; above to parse commits, PR discussions, and chats into structured memory.
+          </p>
+          <button
+            onClick={handleExtract}
+            disabled={isExtracting}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#10b981] text-white text-[13px] font-medium rounded-md hover:bg-[#059669] transition-colors cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5" strokeWidth={2} />
+            Extract Now
+          </button>
+        </div>
+      ) : view === "timeline" ? (
+        /* Timeline view */
         <div className="space-y-3">
           {filtered.map((decision, i) => {
-            const config = sourceTypeConfig[decision.source_type];
+            const config = getSourceConfig(decision.source_type);
             const Icon = config.icon;
-            const confidencePct = Math.round(decision.confidence * 100);
+            const confidence = decision.confidence_score !== undefined ? decision.confidence_score : 0.9;
+            const confidencePct = Math.round(confidence * 100);
+            const isExpanded = expandedIds.has(decision.decision_id);
+            const alternatives = decision.alternatives_considered || [];
+            const participants = decision.participants || [];
 
             return (
-              <div
-                key={decision.id}
-                className={`surface p-5 opacity-0 animate-fade-in-up stagger-${Math.min(i + 1, 6)}`}
-              >
+              <div key={decision.decision_id || i} className="surface p-5 transition-colors">
                 <div className="flex items-start gap-4">
                   {/* Timeline indicator */}
                   <div className="flex flex-col items-center shrink-0">
@@ -167,24 +255,37 @@ export default function DecisionsPage() {
 
                   {/* Content */}
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-[14px] font-medium text-[#fafafa] mb-1.5">
-                      {decision.decision_text}
-                    </h3>
-                    <p className="text-[12px] text-[#525252] leading-relaxed mb-3">
+                    <div className="flex items-start justify-between gap-3 mb-1.5">
+                      <h3 className="text-[14px] font-medium text-[#fafafa] leading-snug">
+                        {decision.decision_text}
+                      </h3>
+                      <button
+                        onClick={() => toggleExpand(decision.decision_id)}
+                        className="text-[#525252] hover:text-[#fafafa] transition-colors p-1 rounded cursor-pointer shrink-0"
+                      >
+                        {isExpanded ? (
+                          <ChevronUp className="w-4 h-4" strokeWidth={1.5} />
+                        ) : (
+                          <ChevronDown className="w-4 h-4" strokeWidth={1.5} />
+                        )}
+                      </button>
+                    </div>
+
+                    <p className="text-[12px] text-[#737373] leading-relaxed mb-3">
                       {decision.reasoning}
                     </p>
 
-                    {/* Alternatives */}
-                    {decision.alternatives.length > 0 && (
+                    {/* Alternatives if present or expanded */}
+                    {alternatives.length > 0 && (
                       <div className="mb-3">
                         <p className="text-[10px] text-[#404040] uppercase tracking-wider font-medium mb-1">
                           Alternatives considered
                         </p>
                         <div className="flex flex-wrap gap-1.5">
-                          {decision.alternatives.map((alt) => (
+                          {alternatives.map((alt, idx) => (
                             <span
-                              key={alt}
-                              className="px-2 py-0.5 rounded bg-[#111111] border border-[#1a1a1a] text-[11px] text-[#525252]"
+                              key={idx}
+                              className="px-2 py-0.5 rounded bg-[#111111] border border-[#1a1a1a] text-[11px] text-[#737373]"
                             >
                               {alt}
                             </span>
@@ -193,37 +294,41 @@ export default function DecisionsPage() {
                       </div>
                     )}
 
-                    {/* Meta row */}
-                    <div className="flex items-center gap-4 flex-wrap">
+                    {/* Meta Row */}
+                    <div className="flex items-center gap-4 flex-wrap pt-2 border-t border-white/5">
                       <span className="forge-badge forge-badge-neutral">
                         <Icon className="w-3 h-3" strokeWidth={2} />
                         {config.label} #{decision.source_id}
                       </span>
-                      <div className="flex items-center gap-1">
-                        <Users className="w-3 h-3 text-[#404040]" strokeWidth={2} />
-                        <span className="text-[11px] text-[#404040]">
-                          {decision.participants.join(", ")}
+                      {participants.length > 0 && (
+                        <div className="flex items-center gap-1">
+                          <Users className="w-3 h-3 text-[#404040]" strokeWidth={2} />
+                          <span className="text-[11px] text-[#737373]">
+                            {participants.join(", ")}
+                          </span>
+                        </div>
+                      )}
+                      {decision.timestamp && (
+                        <span className="text-[11px] text-[#404040]" suppressHydrationWarning>
+                          {new Date(decision.timestamp).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })}
                         </span>
-                      </div>
-                      <span className="text-[11px] text-[#404040]" suppressHydrationWarning>
-                        {new Date(decision.timestamp).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })}
-                      </span>
+                      )}
                       {/* Confidence */}
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 ml-auto">
                         <div className="w-12 h-1 bg-[#1a1a1a] rounded-full overflow-hidden">
                           <div
                             className="h-full rounded-full"
                             style={{
                               width: `${confidencePct}%`,
-                              background: confidencePct > 85 ? "#22c55e" : confidencePct > 70 ? "#f59e0b" : "#ef4444",
+                              background: confidencePct > 85 ? "#10b981" : confidencePct > 70 ? "#f59e0b" : "#ef4444",
                             }}
                           />
                         </div>
-                        <span className="text-[10px] text-[#404040]">{confidencePct}%</span>
+                        <span className="text-[10px] text-[#525252] font-mono">{confidencePct}%</span>
                       </div>
                     </div>
                   </div>
@@ -247,17 +352,24 @@ export default function DecisionsPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((decision) => {
-                  const config = sourceTypeConfig[decision.source_type];
+                {filtered.map((decision, i) => {
+                  const config = getSourceConfig(decision.source_type);
                   const Icon = config.icon;
-                  const confidencePct = Math.round(decision.confidence * 100);
+                  const confidence = decision.confidence_score !== undefined ? decision.confidence_score : 0.9;
+                  const confidencePct = Math.round(confidence * 100);
+                  const participants = decision.participants || [];
 
                   return (
-                    <tr key={decision.id} className="cursor-pointer">
+                    <tr key={decision.decision_id || i} className="cursor-pointer">
                       <td>
-                        <span className="text-[#fafafa] text-[13px] font-medium">
+                        <span className="text-[#fafafa] text-[13px] font-medium block">
                           {decision.decision_text}
                         </span>
+                        {decision.reasoning && (
+                          <span className="text-[#525252] text-[11px] line-clamp-1 mt-0.5">
+                            {decision.reasoning}
+                          </span>
+                        )}
                       </td>
                       <td>
                         <span className="forge-badge forge-badge-neutral">
@@ -267,7 +379,7 @@ export default function DecisionsPage() {
                       </td>
                       <td>
                         <span className="text-[12px] text-[#525252]">
-                          {decision.participants.length} people
+                          {participants.length > 0 ? `${participants.length} members` : "—"}
                         </span>
                       </td>
                       <td>
@@ -277,19 +389,21 @@ export default function DecisionsPage() {
                               className="h-full rounded-full"
                               style={{
                                 width: `${confidencePct}%`,
-                                background: confidencePct > 85 ? "#22c55e" : confidencePct > 70 ? "#f59e0b" : "#ef4444",
+                                background: confidencePct > 85 ? "#10b981" : confidencePct > 70 ? "#f59e0b" : "#ef4444",
                               }}
                             />
                           </div>
-                          <span className="text-[11px] text-[#525252]">{confidencePct}%</span>
+                          <span className="text-[11px] text-[#525252] font-mono">{confidencePct}%</span>
                         </div>
                       </td>
                       <td>
                         <span className="text-[12px] text-[#525252]" suppressHydrationWarning>
-                          {new Date(decision.timestamp).toLocaleDateString("en-US", {
-                            month: "short",
-                            day: "numeric",
-                          })}
+                          {decision.timestamp
+                            ? new Date(decision.timestamp).toLocaleDateString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                              })
+                            : "—"}
                         </span>
                       </td>
                     </tr>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -20,9 +20,13 @@ import {
   GitPullRequest,
   GitCommit,
   Users,
+  RefreshCw,
+  Trash2,
 } from "lucide-react";
 import { GithubIcon } from "@/components/shared/github-icon";
 import { useProjectStore } from "@/store/use-project-store";
+import { useAuthStore } from "@/store/use-auth-store";
+import { api } from "@/lib/api";
 
 // Mock activity timeline
 const mockActivity = [
@@ -59,13 +63,47 @@ const mockActivity = [
 export default function ProjectPage() {
   const params = useParams();
   const projectId = params.id as string;
-  const { currentProject, fetchProject, isLoading } = useProjectStore();
+  const currentProject = useProjectStore((state) => state.currentProject);
+  const fetchProject = useProjectStore((state) => state.fetchProject);
+  const isLoading = useProjectStore((state) => state.isLoading);
+  const user = useAuthStore((state) => state.user);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState("");
+
+  const handleKick = async (memberId: string) => {
+    if (!confirm("Are you sure you want to remove this member from the project?")) return;
+    try {
+      await api.delete(`/projects/${projectId}/members/${memberId}`);
+      await fetchProject(projectId);
+    } catch (err) {
+      console.error("Failed to kick member:", err);
+      alert("Failed to remove member.");
+    }
+  };
 
   useEffect(() => {
-    fetchProject(projectId);
+    if (projectId) {
+      fetchProject(projectId);
+    }
   }, [projectId, fetchProject]);
 
-  if (isLoading || !currentProject) {
+  const handleSyncGithub = async () => {
+    setIsSyncing(true);
+    setSyncMessage("");
+    try {
+      await api.post(`/projects/${projectId}/ingest/github`);
+      setSyncMessage("Sync started! Processing in background...");
+      await fetchProject(projectId, true);
+    } catch (err) {
+      console.error("Failed to start sync", err);
+      setSyncMessage("Failed to start sync.");
+    } finally {
+      setIsSyncing(false);
+      setTimeout(() => setSyncMessage(""), 5000);
+    }
+  };
+
+  if (!currentProject) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <Loader2 className="w-5 h-5 text-[#10b981] animate-spin" strokeWidth={2} />
@@ -86,10 +124,16 @@ export default function ProjectPage() {
       description: "Ask questions about your project with source citations",
     },
     {
+      href: `/project/${projectId}/group-chat`,
+      icon: Users,
+      title: "Team Group Chat",
+      description: "Chat with teammates. Decisions and configs are auto-indexed to memory",
+    },
+    {
       href: `/project/${projectId}/voice`,
       icon: Mic,
-      title: "Voice Assistant",
-      description: "Speak to your project knowledge using Agora AI",
+      title: "Voice Meeting Room",
+      description: "Host team meetings, transcribe discussions, and save filtered key decisions",
     },
     {
       href: `/project/${projectId}/decisions`,
@@ -101,13 +145,20 @@ export default function ProjectPage() {
 
   return (
     <div className="p-6 lg:p-8 max-w-[1200px]">
-      {/* Project header */}
+      {/* Project Header */}
       <div className="mb-6">
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-[#fafafa] tracking-tight">{p.name}</h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-lg font-semibold text-[#fafafa] tracking-tight">{p.name}</h1>
+              {p.join_code && (
+                <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-[#141414] border border-[#262626] text-[#10b981]">
+                  Join Code: {p.join_code}
+                </span>
+              )}
+            </div>
             <p className="text-[#525252] text-[13px] mt-0.5">
-              {p.description || "No description"}
+              {p.description || "No description provided"}
             </p>
           </div>
           {p.github_repo_url && (
@@ -122,6 +173,113 @@ export default function ProjectPage() {
               <ArrowUpRight className="w-3 h-3" strokeWidth={2} />
             </a>
           )}
+        </div>
+      </div>
+
+      {/* Ingestion & Team Status Cards */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-6">
+        {/* GitHub Ingestion */}
+        <div className="surface p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <GithubIcon className="w-4 h-4 text-[#a3a3a3]" size={16} />
+              <span className="text-[13px] font-medium text-[#fafafa]">GitHub</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleSyncGithub}
+                disabled={isSyncing || !p?.github_repo_url}
+                className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#141414] hover:bg-[#1f1f1f] text-[11px] font-medium text-[#fafafa] border border-[#262626] transition-colors disabled:opacity-40 cursor-pointer"
+              >
+                <RefreshCw className={`w-3 h-3 ${isSyncing ? "animate-spin" : ""}`} strokeWidth={1.5} />
+                Sync
+              </button>
+              {p?.ingestion_status?.github_backfill_complete ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" strokeWidth={1.5} />
+              ) : (
+                <Circle className="w-4 h-4 text-[#404040]" strokeWidth={1.5} />
+              )}
+            </div>
+          </div>
+          <p className="text-[12px] text-[#525252]">
+            {syncMessage ? (
+              <span className="text-[#10b981] font-mono animate-pulse">{syncMessage}</span>
+            ) : p?.ingestion_status?.github_backfill_complete ? (
+              `${p?.ingestion_status?.github_chunks_count || 0} chunks indexed`
+            ) : p?.github_repo_url ? (
+              "Ready to sync repository..."
+            ) : (
+              "Not connected"
+            )}
+          </p>
+        </div>
+
+        {/* Discord Ingestion */}
+        <div className="surface p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Hash className="w-4 h-4 text-[#a3a3a3]" strokeWidth={1.5} />
+              <span className="text-[13px] font-medium text-[#fafafa]">Discord</span>
+            </div>
+            {p?.ingestion_status?.discord_backfill_complete ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" strokeWidth={1.5} />
+            ) : (
+              <Circle className="w-4 h-4 text-[#404040]" strokeWidth={1.5} />
+            )}
+          </div>
+          <p className="text-[12px] text-[#525252]">
+            {p?.ingestion_status?.discord_backfill_complete
+              ? `${p?.ingestion_status?.discord_chunks_count || 0} chunks indexed`
+              : p?.discord_guild_id
+                ? "Listening for messages..."
+                : "Not connected"}
+          </p>
+        </div>
+
+        {/* Team Members */}
+        <div className="surface p-4 flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Users className="w-4 h-4 text-[#a3a3a3]" strokeWidth={1.5} />
+              <span className="text-[13px] font-medium text-[#fafafa]">Team Members</span>
+            </div>
+            <span className="text-[11px] text-[#525252] font-mono">
+              {p?.members?.length || 0} / {p?.max_members || 10} max
+            </span>
+          </div>
+
+          <div className="space-y-1.5 max-h-[80px] overflow-y-auto pr-1">
+            {p?.member_details?.map((member) => (
+              <div key={member.user_id} className="flex items-center justify-between py-0.5">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  {member.avatar_url ? (
+                    <img src={member.avatar_url} alt={member.github_username || ""} className="w-4 h-4 rounded-full shrink-0" />
+                  ) : (
+                    <div className="w-4 h-4 rounded-full bg-[#1a1a1a] flex items-center justify-center text-[8px] text-white shrink-0 font-bold">
+                      {(member.github_username || "??").substring(0, 2).toUpperCase()}
+                    </div>
+                  )}
+                  <span className="text-[11px] text-[#a3a3a3] truncate font-medium">
+                    {member.github_username || member.user_id}
+                  </span>
+                  {member.user_id === p?.owner_id && (
+                    <span className="text-[9px] font-semibold text-[#10b981] bg-[rgba(16,185,129,0.1)] px-1 py-0.25 rounded shrink-0">
+                      Owner
+                    </span>
+                  )}
+                </div>
+                {p?.owner_id === user?.user_id && member.user_id !== p?.owner_id && (
+                  <button
+                    onClick={() => handleKick(member.user_id)}
+                    className="text-[#404040] hover:text-red-400 p-0.5 rounded cursor-pointer transition-colors"
+                    title="Remove Member"
+                  >
+                    <Trash2 className="w-3 h-3" strokeWidth={1.5} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 

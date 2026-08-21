@@ -10,9 +10,9 @@ interface ProjectState {
   isLoading: boolean;
   error: string | null;
   fetchProjects: () => Promise<void>;
-  fetchProject: (id: string) => Promise<void>;
+  fetchProject: (id: string, silent?: boolean) => Promise<void>;
   setCurrentProject: (project: Project | null) => void;
-  createProject: (data: { name: string; description?: string; github_repo_url?: string }) => Promise<Project>;
+  createProject: (data: { name: string; description?: string; github_repo_url?: string; max_members?: number }) => Promise<Project>;
   deleteProject: (id: string) => Promise<void>;
 }
 
@@ -32,8 +32,10 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
     }
   },
 
-  fetchProject: async (id: string) => {
-    set({ isLoading: true, error: null });
+  fetchProject: async (id: string, silent: boolean = false) => {
+    if (!silent) {
+      set({ isLoading: true, error: null });
+    }
     try {
       const project = await api.get<Project>(`/projects/${id}`);
       set({ currentProject: project, isLoading: false });

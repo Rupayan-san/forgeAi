@@ -1,189 +1,379 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { useParams } from "next/navigation";
 import {
   Mic,
   MicOff,
+  Phone,
+  PhoneOff,
+  Users,
+  Loader2,
   Volume2,
   Clock,
   Zap,
-  Radio,
 } from "lucide-react";
+import { api } from "@/lib/api";
+import { useAuthStore } from "@/store/use-auth-store";
+import { useProjectStore } from "@/store/use-project-store";
 
-type VoiceState = "idle" | "listening" | "processing";
+interface SpeechRecognitionEvent {
+  resultIndex: number;
+  results: {
+    length: number;
+    [key: number]: {
+      isFinal: boolean;
+      [key: number]: {
+        transcript: string;
+      };
+    };
+  };
+}
 
-const mockTranscripts = [
-  {
-    id: "1",
-    question: "What was the reasoning behind the API redesign?",
-    answer: "The API redesign was discussed in PR #34 and the #backend Discord channel...",
-    duration: "0:42",
-    time: "Today, 2:15 PM",
-  },
-  {
-    id: "2",
-    question: "Who worked on the authentication module?",
-    answer: "Based on commit history, Sarah and Alex primarily worked on the auth module...",
-    duration: "0:28",
-    time: "Today, 1:30 PM",
-  },
-  {
-    id: "3",
-    question: "What are the pending technical decisions?",
-    answer: "There are 3 open decisions: database migration timeline, caching strategy, and API versioning...",
-    duration: "1:15",
-    time: "Yesterday, 4:45 PM",
-  },
-];
+interface SpeechRecognitionErrorEvent {
+  error: string;
+}
 
-export default function VoicePage() {
-  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
-  const [transcript, setTranscript] = useState("");
+interface SpeechRecognition {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: (event: SpeechRecognitionEvent) => void;
+  onend: () => void;
+  onerror: (event: SpeechRecognitionErrorEvent) => void;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+}
 
-  const handleMicClick = () => {
-    if (voiceState === "idle") {
-      setVoiceState("listening");
-      setTranscript("");
-      // Simulate listening
-      setTimeout(() => {
-        setTranscript("What decisions were made about the database...");
-      }, 1000);
-      setTimeout(() => {
-        setVoiceState("processing");
-      }, 3000);
-      setTimeout(() => {
-        setVoiceState("idle");
-        setTranscript("");
-      }, 5000);
+type TranscriptLine = {
+  id: string;
+  text: string;
+  speaker: string;
+  isFinal: boolean;
+  timestamp: string;
+};
+
+export default function VoiceMeetingPage() {
+  const { id: projectId } = useParams() as { id: string };
+  const { user } = useAuthStore();
+  const { currentProject } = useProjectStore();
+
+  const [isMeetingActive, setIsMeetingActive] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isSupported, setIsSupported] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [transcripts, setTranscripts] = useState<TranscriptLine[]>([]);
+
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const transcriptsEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Check browser support
+    const SpeechRecognitionClass =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognitionClass) {
+      setIsSupported(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognitionClass();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let interimTranscript = "";
+      let finalTranscript = "";
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          finalTranscript += result[0].transcript;
+        } else {
+          interimTranscript += result[0].transcript;
+        }
+      }
+
+      setTranscripts((prev) => {
+        const updated = [...prev];
+        const lastLineIndex = updated.length - 1;
+        const lastLine = lastLineIndex >= 0 ? updated[lastLineIndex] : null;
+
+        if (finalTranscript) {
+          if (lastLine && !lastLine.isFinal && lastLine.speaker === (user?.name || "Me")) {
+            lastLine.text = finalTranscript;
+            lastLine.isFinal = true;
+          } else {
+            updated.push({
+              id: Date.now().toString(),
+              text: finalTranscript,
+              speaker: user?.name || "Me",
+              isFinal: true,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        } else if (interimTranscript) {
+          if (lastLine && !lastLine.isFinal && lastLine.speaker === (user?.name || "Me")) {
+            lastLine.text = interimTranscript;
+          } else {
+            updated.push({
+              id: Date.now().toString(),
+              text: interimTranscript,
+              speaker: user?.name || "Me",
+              isFinal: false,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        }
+        return updated;
+      });
+    };
+
+    recognition.onend = () => {
+      if (isMeetingActive && !isMuted && recognitionRef.current) {
+        try {
+          recognitionRef.current.start();
+        } catch (e) {
+          console.error("Could not restart recognition:", e);
+        }
+      }
+    };
+
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      console.error("Speech recognition error", event.error);
+    };
+
+    recognitionRef.current = recognition;
+
+    return () => {
+      recognition.abort();
+    };
+  }, [user, isMeetingActive, isMuted]);
+
+  useEffect(() => {
+    transcriptsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [transcripts]);
+
+  const toggleMute = () => {
+    if (!recognitionRef.current) return;
+
+    if (isMuted) {
+      setIsMuted(false);
+      try {
+        recognitionRef.current.start();
+      } catch (e) {}
     } else {
-      setVoiceState("idle");
-      setTranscript("");
+      setIsMuted(true);
+      recognitionRef.current.stop();
     }
   };
 
-  return (
-    <div className="p-6 lg:p-8 max-w-[1200px]">
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-lg font-semibold text-[#fafafa] tracking-tight">Voice Assistant</h1>
-        <p className="text-[#525252] text-[13px] mt-0.5">
-          Speak to your project knowledge using Agora Conversational AI
-        </p>
+  const startMeeting = () => {
+    setIsMeetingActive(true);
+    setTranscripts([]);
+    setIsMuted(false);
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.start();
+      } catch (e) {}
+    }
+  };
+
+  const endMeeting = async () => {
+    setIsMeetingActive(false);
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+
+    const fullTranscript = transcripts
+      .filter((t) => t.isFinal)
+      .map((t) => `${t.speaker}: ${t.text}`)
+      .join("\n");
+
+    if (!fullTranscript.trim()) return;
+
+    setIsProcessing(true);
+    try {
+      await api.post(`/projects/${projectId}/group-chat`, {
+        content: `🎙️ Voice Meeting Transcript:\n\n${fullTranscript}`,
+      });
+    } catch (err) {
+      console.error("Failed to save meeting transcript:", err);
+    } finally {
+      setIsProcessing(false);
+      setTranscripts([]);
+    }
+  };
+
+  if (!isSupported) {
+    return (
+      <div className="p-8">
+        <h1 className="text-lg font-semibold text-[#fafafa] mb-2">Voice Meeting</h1>
+        <div className="surface p-6 text-center">
+          <p className="text-[#a3a3a3] text-[13px]">
+            Your browser does not support the Web Speech API. Please use Google Chrome or Microsoft Edge.
+          </p>
+        </div>
       </div>
+    );
+  }
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Voice interface */}
-        <div className="surface p-8 flex flex-col items-center">
-          {/* Status */}
-          <div className="flex items-center gap-2 mb-8">
-            <div className={`status-dot ${
-              voiceState === "idle" ? "status-dot-idle" :
-              voiceState === "listening" ? "status-dot-success" :
-              "status-dot-warning"
-            }`} />
-            <span className="text-[12px] text-[#525252] uppercase tracking-wider font-medium">
-              {voiceState === "idle" ? "Ready" :
-               voiceState === "listening" ? "Listening..." :
-               "Processing..."}
-            </span>
-          </div>
+  const members = currentProject?.members || [];
+  const participants = [
+    user?.name || "Me",
+    ...members.filter((m) => m !== user?.github_username && m !== user?.user_id).slice(0, 4),
+  ];
 
-          {/* Mic button */}
-          <div className="relative mb-8">
-            {voiceState === "listening" && (
-              <>
-                <div className="absolute inset-0 rounded-full bg-[#10b981] voice-ring" />
-                <div className="absolute inset-0 rounded-full bg-[#10b981] voice-ring" style={{ animationDelay: "0.5s" }} />
-              </>
-            )}
+  return (
+    <div className="flex flex-col h-[calc(100vh-56px)] lg:h-screen bg-[#050505]">
+      {/* Header */}
+      <div className="shrink-0 px-6 py-3.5 border-b border-[#1a1a1a] bg-[#050505] flex justify-between items-center">
+        <div>
+          <h1 className="text-[14px] font-medium text-[#fafafa] flex items-center gap-2">
+            <Phone className="w-4 h-4 text-[#10b981]" />
+            Voice Meeting Room
+            {currentProject?.name && <span className="text-[#525252]">· {currentProject.name}</span>}
+          </h1>
+          <p className="text-[11px] text-[#525252] mt-0.5">
+            Real-time meeting audio transcription with automatic decision extraction
+          </p>
+        </div>
+
+        {isMeetingActive ? (
+          <div className="flex items-center gap-2.5">
             <button
-              onClick={handleMicClick}
-              className={`relative w-20 h-20 rounded-full flex items-center justify-center transition-all cursor-pointer ${
-                voiceState === "idle"
-                  ? "bg-[#111111] border-2 border-[#262626] hover:border-[#10b981] hover:bg-[rgba(16,185,129,0.05)]"
-                  : voiceState === "listening"
-                  ? "bg-[#10b981] border-2 border-[#10b981]"
-                  : "bg-[#111111] border-2 border-[#f59e0b]"
+              onClick={toggleMute}
+              className={`p-2 rounded-md transition-colors cursor-pointer ${
+                isMuted
+                  ? "bg-red-500/20 text-red-400 border border-red-500/30"
+                  : "bg-[#141414] text-white hover:bg-[#1f1f1f] border border-[#262626]"
               }`}
+              title={isMuted ? "Unmute" : "Mute"}
             >
-              {voiceState === "listening" ? (
-                <MicOff className="w-7 h-7 text-white" strokeWidth={1.5} />
-              ) : voiceState === "processing" ? (
-                <Zap className="w-7 h-7 text-[#f59e0b] animate-pulse-subtle" strokeWidth={1.5} />
-              ) : (
-                <Mic className="w-7 h-7 text-[#737373]" strokeWidth={1.5} />
-              )}
+              {isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={endMeeting}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-[13px] font-medium rounded-md transition-colors cursor-pointer"
+            >
+              <PhoneOff className="w-3.5 h-3.5" />
+              End Meeting
             </button>
           </div>
+        ) : (
+          <button
+            onClick={startMeeting}
+            disabled={isProcessing}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#10b981] hover:bg-[#059669] text-white text-[13px] font-medium rounded-md transition-colors disabled:opacity-40 cursor-pointer"
+          >
+            {isProcessing ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Phone className="w-3.5 h-3.5" />
+            )}
+            Host Meeting
+          </button>
+        )}
+      </div>
 
-          {/* Instructions */}
-          <p className="text-[12px] text-[#404040] text-center mb-6">
-            {voiceState === "idle"
-              ? "Click to start speaking"
-              : voiceState === "listening"
-              ? "Click to stop recording"
-              : "Analyzing your question..."}
-          </p>
+      <div className="flex-1 flex overflow-hidden">
+        {/* Participants Grid */}
+        <div className="w-1/3 min-w-[280px] max-w-[360px] border-r border-[#1a1a1a] bg-[#080808] p-5 overflow-y-auto">
+          <h2 className="text-[11px] font-mono font-semibold text-[#525252] uppercase tracking-wider mb-4 flex items-center gap-2">
+            <Users className="w-3.5 h-3.5" />
+            Participants ({isMeetingActive ? participants.length : 0})
+          </h2>
 
-          {/* Waveform visualization */}
-          {voiceState === "listening" && (
-            <div className="flex items-center gap-[3px] h-8 mb-4">
-              {Array.from({ length: 20 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="w-[3px] bg-[#10b981] rounded-full"
-                  style={{
-                    height: `${Math.random() * 24 + 4}px`,
-                    opacity: 0.3 + Math.random() * 0.7,
-                    animation: `pulse-subtle ${0.5 + Math.random() * 0.5}s ease-in-out infinite`,
-                    animationDelay: `${Math.random() * 0.5}s`,
-                  }}
-                />
-              ))}
+          {isMeetingActive ? (
+            <div className="grid grid-cols-2 gap-3">
+              {participants.map((p, i) => {
+                const isMe = i === 0;
+                return (
+                  <div
+                    key={p}
+                    className="aspect-square surface rounded-xl flex flex-col items-center justify-center relative overflow-hidden group p-3"
+                  >
+                    {isMe && !isMuted && (
+                      <div className="absolute inset-0 border-2 border-[#10b981] rounded-xl animate-pulse z-10" />
+                    )}
+
+                    <div className="w-12 h-12 rounded-full bg-[#171717] border border-[#262626] flex items-center justify-center text-sm text-[#fafafa] font-medium z-10 mb-2">
+                      {p.substring(0, 2).toUpperCase()}
+                    </div>
+                    <span className="text-[12px] text-[#fafafa] font-medium z-10 truncate px-2 max-w-full text-center">
+                      {p} {isMe ? "(You)" : ""}
+                    </span>
+
+                    {isMe && isMuted && (
+                      <div className="absolute top-2 right-2 z-10 bg-black/60 p-1 rounded-md text-red-400">
+                        <MicOff className="w-3 h-3" />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          )}
-
-          {/* Live transcript */}
-          {transcript && (
-            <div className="w-full surface-inset p-3 rounded-md">
-              <p className="text-[11px] text-[#525252] uppercase tracking-wider font-medium mb-1.5">
-                Transcript
+          ) : (
+            <div className="flex flex-col items-center justify-center h-48 text-center">
+              <PhoneOff className="w-8 h-8 text-[#262626] mb-3" />
+              <p className="text-[#525252] text-[12px]">
+                No active meeting.<br />Click Host Meeting to begin.
               </p>
-              <p className="text-[13px] text-[#a3a3a3]">{transcript}</p>
             </div>
           )}
         </div>
 
-        {/* Recent sessions */}
-        <div className="surface overflow-hidden">
-          <div className="px-4 py-3 border-b border-[#1a1a1a]">
-            <h2 className="text-[13px] font-medium text-[#a3a3a3]">Recent Voice Sessions</h2>
+        {/* Live Transcript Pane */}
+        <div className="flex-1 flex flex-col bg-[#050505]">
+          <div className="p-3.5 border-b border-[#1a1a1a] bg-[#080808] flex items-center justify-between">
+            <h2 className="text-[11px] font-mono font-semibold text-[#525252] uppercase tracking-wider">
+              Live Transcript
+            </h2>
+            {isMeetingActive && (
+              <div className="flex items-center gap-1.5">
+                <div className="status-dot status-dot-success animate-pulse" />
+                <span className="text-[11px] text-[#10b981] font-mono">Transcribing live</span>
+              </div>
+            )}
           </div>
-          <div className="divide-y divide-[#0f0f0f]">
-            {mockTranscripts.map((session) => (
-              <div key={session.id} className="px-4 py-3.5 hover:bg-[#0f0f0f] transition-colors">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[13px] text-[#fafafa] mb-1 truncate">
-                      &quot;{session.question}&quot;
-                    </p>
-                    <p className="text-[12px] text-[#525252] line-clamp-2 leading-relaxed">
-                      {session.answer}
-                    </p>
-                    <div className="flex items-center gap-3 mt-2">
-                      <div className="flex items-center gap-1">
-                        <Clock className="w-3 h-3 text-[#404040]" strokeWidth={2} />
-                        <span className="text-[10px] text-[#404040]">{session.duration}</span>
-                      </div>
-                      <span className="text-[10px] text-[#404040]">{session.time}</span>
-                    </div>
-                  </div>
-                  <div className="shrink-0">
-                    <Volume2 className="w-3.5 h-3.5 text-[#404040]" strokeWidth={1.5} />
+
+          <div className="flex-1 overflow-y-auto p-6 space-y-3.5">
+            {!isMeetingActive && transcripts.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-[#525252] text-[13px]">
+                Start the meeting to capture and transcribe discussions in real-time.
+              </div>
+            ) : transcripts.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-[#525252] text-[13px]">
+                <Mic className="w-5 h-5 text-[#10b981] animate-pulse mb-2" />
+                Listening for speech...
+              </div>
+            ) : (
+              transcripts.map((t) => (
+                <div
+                  key={t.id}
+                  className={`flex flex-col ${
+                    t.speaker === user?.name || t.speaker === "Me" ? "items-end" : "items-start"
+                  }`}
+                >
+                  <span className="text-[10px] text-[#525252] mb-1 px-1">
+                    {t.speaker} · {new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                  <div
+                    className={`px-3.5 py-2 rounded-lg max-w-[80%] ${
+                      t.speaker === user?.name || t.speaker === "Me"
+                        ? "surface-elevated text-[#fafafa] border border-emerald-500/20"
+                        : "surface text-[#a3a3a3]"
+                    } ${!t.isFinal ? "opacity-60 italic" : ""}`}
+                  >
+                    <p className="text-[13px] leading-relaxed whitespace-pre-wrap">{t.text}</p>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
+            <div ref={transcriptsEndRef} />
           </div>
         </div>
       </div>
