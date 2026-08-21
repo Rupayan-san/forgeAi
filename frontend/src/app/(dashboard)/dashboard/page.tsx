@@ -385,9 +385,26 @@ export default function DashboardPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [joinDialogOpen, setJoinDialogOpen] = useState(false);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [pendingProjects, setPendingProjects] = useState<Project[]>([]);
   const [isLoadingActivity, setIsLoadingActivity] = useState(true);
   const { user } = useAuthStore();
-  const { projects, isLoading } = useProjectStore();
+  const { projects, isLoading, fetchProjects } = useProjectStore();
+
+  const fetchPendingRequests = async () => {
+    try {
+      const pending = await api.get<Project[]>("/projects/join/pending");
+      setPendingProjects(pending || []);
+    } catch {
+      setPendingProjects([]);
+    }
+  };
+
+  useEffect(() => {
+    if (user) {
+      fetchProjects();
+      fetchPendingRequests();
+    }
+  }, [user, fetchProjects]);
 
   useEffect(() => {
     setIsLoadingActivity(true);
@@ -442,6 +459,39 @@ export default function DashboardPage() {
           </button>
         </div>
       </div>
+
+      {/* Pending Join Requests Banner */}
+      {pendingProjects.length > 0 && (
+        <div className="mb-6 surface p-4 border border-amber-500/30 bg-amber-500/5">
+          <div className="flex items-center gap-2 mb-1.5">
+            <Clock className="w-4 h-4 text-amber-400" strokeWidth={1.5} />
+            <h3 className="text-[13px] font-semibold text-amber-300">
+              Pending Join Requests ({pendingProjects.length})
+            </h3>
+          </div>
+          <p className="text-[12px] text-[#888] mb-3">
+            You requested to join the following project{pendingProjects.length > 1 ? "s" : ""}. They will appear in your active workspace once approved by the project owner.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {pendingProjects.map((proj) => (
+              <div
+                key={proj.project_id}
+                className="bg-[#111] border border-[#222] rounded-md p-3 flex items-center justify-between"
+              >
+                <div>
+                  <p className="text-[13px] font-medium text-[#fafafa]">{proj.name}</p>
+                  <p className="text-[11px] text-[#666] font-mono mt-0.5">
+                    {proj.github_repo_name || "Repository not linked"}
+                  </p>
+                </div>
+                <span className="text-[11px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded font-medium">
+                  Awaiting Approval
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
@@ -572,11 +622,19 @@ export default function DashboardPage() {
 
       <CreateProjectDialog
         isOpen={dialogOpen}
-        onClose={() => setDialogOpen(false)}
+        onClose={() => {
+          setDialogOpen(false);
+          fetchProjects();
+          fetchPendingRequests();
+        }}
       />
       <JoinProjectDialog
         isOpen={joinDialogOpen}
-        onClose={() => setJoinDialogOpen(false)}
+        onClose={() => {
+          setJoinDialogOpen(false);
+          fetchProjects();
+          fetchPendingRequests();
+        }}
       />
     </div>
   );

@@ -174,6 +174,26 @@ async def request_join(
         )
     return {"message": "Join request sent"}
 
+
+@router.get("/join/pending", response_model=list[ProjectResponse])
+async def get_my_pending_projects(
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Get all projects where the current user has sent a join request that is pending approval."""
+    uid = current_user.user_id
+    query_conditions = [{"join_requests": uid}]
+    if ObjectId.is_valid(uid):
+        query_conditions.append({"join_requests": ObjectId(uid)})
+
+    cursor = db["projects"].find({"$or": query_conditions})
+    projects = []
+    async for doc in cursor:
+        resp = await build_project_response(db, doc)
+        projects.append(resp)
+    return projects
+
+
 @router.get("/{project_id}/join/requests")
 async def get_join_requests(
     project_id: str,
@@ -365,8 +385,18 @@ async def list_projects(
     current_user: UserModel = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
-    """List all projects the current user is a member of."""
-    cursor = db["projects"].find({"members": current_user.user_id})
+    """List all projects the current user is a member of or owns."""
+    uid = current_user.user_id
+    query_conditions = [
+        {"members": uid},
+        {"owner_id": uid},
+    ]
+    if ObjectId.is_valid(uid):
+        query_conditions.extend([
+            {"members": ObjectId(uid)},
+            {"owner_id": ObjectId(uid)},
+        ])
+    cursor = db["projects"].find({"$or": query_conditions}).sort("created_at", -1)
     projects = []
     async for doc in cursor:
         resp = await build_project_response(db, doc)
@@ -453,15 +483,24 @@ async def get_all_recent_activity(
     def parse_time(item):
         ts = item.get("timestamp")
         if isinstance(ts, datetime):
-            return ts
+            return ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
         if isinstance(ts, str):
             try:
-                return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
             except Exception:
                 pass
         return datetime.min.replace(tzinfo=timezone.utc)
 
     activities.sort(key=parse_time, reverse=True)
+    for item in activities:
+        ts = item.get("timestamp")
+        if isinstance(ts, datetime):
+            item["timestamp"] = ts.isoformat()
+        elif ts is None:
+            item["timestamp"] = datetime.now(timezone.utc).isoformat()
+        else:
+            item["timestamp"] = str(ts)
     return [ActivityItem(**item) for item in activities[:25]]
 
 
@@ -675,13 +714,22 @@ async def get_project_activity(
     def parse_time(item):
         ts = item.get("timestamp")
         if isinstance(ts, datetime):
-            return ts
+            return ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
         if isinstance(ts, str):
             try:
-                return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
             except Exception:
                 pass
         return datetime.min.replace(tzinfo=timezone.utc)
 
     activities.sort(key=parse_time, reverse=True)
+    for item in activities:
+        ts = item.get("timestamp")
+        if isinstance(ts, datetime):
+            item["timestamp"] = ts.isoformat()
+        elif ts is None:
+            item["timestamp"] = datetime.now(timezone.utc).isoformat()
+        else:
+            item["timestamp"] = str(ts)
     return [ActivityItem(**item) for item in activities[:20]]
