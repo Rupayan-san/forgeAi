@@ -13,11 +13,27 @@ class ApiClient {
   }
 
   private getHeaders(): HeadersInit {
+    let token = this.token;
+    if (!token && typeof window !== "undefined") {
+      try {
+        const raw = localStorage.getItem("forge-auth");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          token = parsed?.state?.token;
+        }
+        if (!token) {
+          token = localStorage.getItem("token");
+        }
+        if (token) {
+          this.token = token;
+        }
+      } catch {}
+    }
     const headers: HeadersInit = {
       "Content-Type": "application/json",
     };
-    if (this.token) {
-      headers["Authorization"] = `Bearer ${this.token}`;
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
     }
     return headers;
   }

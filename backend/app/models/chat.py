@@ -46,3 +46,5 @@ class ChatResponse(BaseModel):
     content: str
     sources: list[SourceCitation]
     created_at: datetime
+    trace: list[str] = Field(default_factory=list)
+

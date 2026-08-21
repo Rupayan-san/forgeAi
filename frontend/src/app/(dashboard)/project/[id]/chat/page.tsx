@@ -2,21 +2,19 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import {
   Send,
   Loader2,
-  GitPullRequest,
-  GitCommit,
-  Hash,
-  FileText,
-  FileCode2,
   ChevronDown,
-  Zap,
   User,
-  Bot,
   Sparkles,
+  ArrowLeft,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { getSourceConfig, summarizeSourceTypes } from "@/lib/sourceTypes";
+import { useAuthStore } from "@/store/use-auth-store";
+import { AIThinkingBlock } from "@/components/chat/ai-thinking-block";
 
 interface SourceCitation {
   source_type: string;
@@ -32,18 +30,43 @@ interface ChatMessage {
   sources: SourceCitation[];
   created_at: string;
   role: "user" | "assistant";
+  trace?: string[];
 }
 
 const suggestedQueries = [
+  "What's the difference between let and const in JavaScript?",
   "Why did we choose this architecture?",
   "What decisions were made in the last sprint?",
-  "Summarize the latest PR discussions",
-  "What are the open technical debt items?",
+  "Summarize recent PR discussions",
 ];
+
+function formatMessageTime(isoString?: string): string {
+  if (!isoString) {
+    return new Date().toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  }
+  try {
+    let s = String(isoString).trim();
+    if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)) s += "Z";
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return "";
+    return d.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return "";
+  }
+}
 
 export default function ChatPage() {
   const params = useParams();
   const projectId = params.id as string;
+  const { user } = useAuthStore();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -115,6 +138,7 @@ export default function ChatPage() {
         content: string;
         sources: SourceCitation[];
         created_at: string;
+        trace?: string[];
       }>(`/projects/${projectId}/chat`, {
         message: userMessage.content,
         interface_type: "text",
@@ -124,6 +148,7 @@ export default function ChatPage() {
         ...response,
         role: "assistant",
         sources: response.sources || [],
+        trace: response.trace || [],
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -151,51 +176,56 @@ export default function ChatPage() {
     }
   };
 
-  const getSourceIcon = (type: string) => {
-    switch (type?.toLowerCase()) {
-      case "pr":
-      case "github_pr":
-        return GitPullRequest;
-      case "commit":
-      case "github_commit":
-        return GitCommit;
-      case "discord":
-      case "discord_message":
-        return Hash;
-      case "github_file":
-        return FileCode2;
-      default:
-        return FileText;
-    }
-  };
-
   return (
-    <div className="flex flex-col h-[calc(100vh-56px)] lg:h-screen bg-[#050505]">
+    <div className="flex flex-col h-[calc(100vh-56px)] max-h-[calc(100vh-56px)] overflow-hidden bg-background text-foreground transition-colors duration-200">
       {/* Header */}
-      <div className="shrink-0 px-6 py-3 border-b border-[#1a1a1a] bg-[#050505]">
-        <h1 className="text-[14px] font-medium text-[#fafafa]">Chat Q&A</h1>
-        <p className="text-[11px] text-[#525252]">
-          Ask questions about your project — answers are grounded with source citations.
-        </p>
+      <div className="shrink-0 px-4 sm:px-6 py-3.5 border-b border-border bg-card/60 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Link
+            href={`/project/${projectId}`}
+            className="p-1.5 rounded-sm bg-card hover:bg-accent border border-border text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0 shadow-2xs"
+            title="Back to Project"
+            aria-label="Back to Project"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </Link>
+          <div className="w-8 h-8 rounded-sm bg-card border border-border flex items-center justify-center font-mono font-bold text-xs text-foreground shadow-2xs">
+            AI
+          </div>
+          <div>
+            <h1 className="text-sm sm:text-base font-bold font-mono text-foreground">
+              Project AI Assistant
+            </h1>
+            <p className="text-xs text-muted-foreground font-mono mt-0.5">
+              Knowledge Q&A grounded with source citations
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-background border border-border text-muted-foreground text-xs font-mono font-medium">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            RAG Memory Active
+          </span>
+        </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-6 py-4">
-        <div className="max-w-2xl mx-auto space-y-4">
+      {/* Messages Feed */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 py-6">
+        <div className="max-w-3xl mx-auto space-y-6">
           {isLoadingHistory ? (
             <div className="flex items-center justify-center py-20">
-              <Loader2 className="w-5 h-5 text-[#10b981] animate-spin" strokeWidth={2} />
+              <Loader2 className="w-5 h-5 text-emerald-500 animate-spin" strokeWidth={2} />
             </div>
           ) : messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
-              <div className="w-10 h-10 rounded-md bg-[#111111] border border-[#1a1a1a] flex items-center justify-center mb-3">
-                <Zap className="w-4 h-4 text-[#10b981]" strokeWidth={1.5} />
+              <div className="w-10 h-10 rounded-sm bg-card border border-border flex items-center justify-center mb-3 font-mono font-bold text-sm text-foreground shadow-2xs">
+                AI
               </div>
-              <h2 className="text-[14px] font-semibold text-[#fafafa] mb-1">
-                Ask anything about your project
+              <h2 className="text-sm sm:text-base font-bold font-mono text-foreground mb-1">
+                Ask anything about your codebase & workspace
               </h2>
-              <p className="text-[#525252] text-[12px] max-w-sm mb-6">
-                Try asking about architectural decisions, recent PR discussions, or commit history.
+              <p className="text-muted-foreground text-xs font-mono max-w-sm mb-6">
+                Queries are grounded with vector search across code, commits, discussions, and decisions.
               </p>
 
               {/* Suggested queries */}
@@ -204,7 +234,7 @@ export default function ChatPage() {
                   <button
                     key={q}
                     onClick={() => handleSend(q)}
-                    className="px-3 py-1.5 rounded-md border border-[#1a1a1a] bg-[#0a0a0a] text-[12px] text-[#737373] hover:text-[#a3a3a3] hover:border-[#262626] transition-colors cursor-pointer"
+                    className="px-3 py-1.5 rounded-sm border border-border bg-card text-xs font-mono text-muted-foreground hover:text-foreground hover:border-zinc-400 dark:hover:border-zinc-700 transition-colors cursor-pointer shadow-2xs text-left"
                   >
                     {q}
                   </button>
@@ -212,105 +242,165 @@ export default function ChatPage() {
               </div>
             </div>
           ) : (
-            messages.map((msg) => (
-              <div
-                key={msg.message_id}
-                className={`flex gap-3 ${msg.role === "user" ? "justify-end" : ""}`}
-              >
-                {msg.role === "assistant" && (
-                  <div className="w-7 h-7 rounded-md bg-[rgba(16,185,129,0.1)] border border-[rgba(16,185,129,0.15)] flex items-center justify-center shrink-0 mt-0.5">
-                    <Zap className="w-3.5 h-3.5 text-[#10b981]" strokeWidth={2} />
-                  </div>
-                )}
+            messages.map((msg) => {
+              const isUser = msg.role === "user";
 
-                <div
-                  className={`max-w-[85%] ${
-                    msg.role === "user"
-                      ? "surface-elevated px-4 py-2.5 rounded-lg"
-                      : ""
-                  }`}
-                >
-                  <p
-                    className={`text-[13px] leading-relaxed whitespace-pre-wrap ${
-                      msg.role === "user" ? "text-[#fafafa]" : "text-[#a3a3a3]"
-                    }`}
-                  >
-                    {msg.content}
-                  </p>
+              if (isUser) {
+                return (
+                  /* User Message Block */
+                  <div key={msg.message_id} className="flex items-start justify-end gap-3.5 my-4">
+                    <div className="bg-white dark:bg-white text-black rounded-sm p-4 sm:p-5 max-w-[85%] sm:max-w-[75%] shadow-md border border-zinc-200">
+                      <p className="font-mono text-xs sm:text-sm leading-relaxed whitespace-pre-wrap font-normal text-black">
+                        {msg.content}
+                      </p>
+                      <div className="mt-3 text-[11px] font-mono text-zinc-500 font-medium">
+                        {formatMessageTime(msg.created_at)}
+                      </div>
+                    </div>
 
-                  {/* Sources */}
-                  {msg.role === "assistant" && msg.sources && msg.sources.length > 0 && (
-                    <div className="mt-2.5 pt-2.5 border-t border-white/5">
-                      <button
-                        onClick={() => toggleSources(msg.message_id)}
-                        className="flex items-center gap-1.5 text-[11px] text-[#525252] hover:text-[#10b981] transition-colors cursor-pointer"
-                      >
-                        <ChevronDown
-                          className={`w-3 h-3 transition-transform ${
-                            expandedSources.has(msg.message_id) ? "rotate-180" : ""
-                          }`}
-                          strokeWidth={1.5}
+                    {/* User Avatar Box */}
+                    <div className="w-8 h-8 rounded-sm bg-card border border-border flex items-center justify-center shrink-0 mt-0.5 shadow-2xs overflow-hidden">
+                      {user?.avatar_url ? (
+                        <img
+                          src={user.avatar_url}
+                          alt={user.github_username || user.name || "User"}
+                          className="w-full h-full object-cover"
                         />
-                        <span>
-                          {msg.sources.length} source{msg.sources.length !== 1 ? "s" : ""} cited
+                      ) : user?.github_username ? (
+                        <span className="text-[11px] font-mono font-bold text-foreground">
+                          {user.github_username.substring(0, 2).toUpperCase()}
                         </span>
-                      </button>
-
-                      {expandedSources.has(msg.message_id) && (
-                        <div className="mt-2 space-y-1.5">
-                          {msg.sources.map((source, i) => {
-                            const Icon = getSourceIcon(source.source_type);
-                            return (
-                              <div
-                                key={i}
-                                className="p-2 rounded-md bg-[#0a0a0a] border border-[#1a1a1a] text-xs flex items-start gap-2"
-                              >
-                                <Icon
-                                  className="w-3.5 h-3.5 text-[#10b981] shrink-0 mt-0.5"
-                                  strokeWidth={1.5}
-                                />
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center justify-between gap-2">
-                                    <span className="text-zinc-300 font-mono text-[11px] font-medium truncate">
-                                      {source.source_id}
-                                    </span>
-                                    <span className="text-[10px] text-zinc-500 font-mono">
-                                      {Math.round(source.relevance_score * 100)}% match
-                                    </span>
-                                  </div>
-                                  {source.content_preview && (
-                                    <p className="text-zinc-500 text-[11px] mt-0.5 line-clamp-2 leading-snug">
-                                      {source.content_preview}
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
+                      ) : (
+                        <User className="w-4 h-4 text-foreground" strokeWidth={1.5} />
                       )}
                     </div>
-                  )}
-                </div>
-
-                {msg.role === "user" && (
-                  <div className="w-7 h-7 rounded-md bg-[#171717] border border-[#262626] flex items-center justify-center shrink-0 mt-0.5">
-                    <User className="w-3.5 h-3.5 text-[#525252]" strokeWidth={2} />
                   </div>
-                )}
-              </div>
-            ))
+                );
+              }
+
+              /* Assistant Message Block */
+              return (
+                <div key={msg.message_id} className="flex items-start gap-3.5 my-5">
+                  {/* AI Avatar Box */}
+                  <div className="w-8 h-8 rounded-sm bg-card border border-border flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">
+                    <span className="font-mono font-bold text-xs text-foreground tracking-tight">
+                      AI
+                    </span>
+                  </div>
+
+                  <div className="flex-1 min-w-0 max-w-[90%] font-mono">
+                    <div className="text-xs sm:text-sm text-foreground leading-relaxed whitespace-pre-wrap font-normal space-y-2">
+                      {msg.content}
+                    </div>
+
+                    {/* Timestamp */}
+                    <div className="mt-2.5 text-[11px] font-mono text-muted-foreground font-medium">
+                      {formatMessageTime(msg.created_at)}
+                    </div>
+
+                    {/* Sources Citations */}
+                    {msg.sources && msg.sources.length > 0 && (() => {
+                      const uniqueTypes = summarizeSourceTypes(msg.sources.map((s) => s.source_type));
+                      const isMultiSource = uniqueTypes.length >= 2;
+
+                      return (
+                        <div className="mt-3 pt-3 border-t border-border/60">
+                          {isMultiSource && (
+                            <div className="flex items-center gap-1.5 mb-2 px-2 py-1 rounded-sm bg-emerald-500/10 border border-emerald-500/20 w-fit">
+                              <Sparkles className="w-3 h-3 text-emerald-500" strokeWidth={2} />
+                              <span className="text-[11px] text-emerald-500 font-mono font-medium">
+                                Synthesized from {uniqueTypes.join(" + ")}
+                              </span>
+                            </div>
+                          )}
+
+                          <button
+                            onClick={() => toggleSources(msg.message_id)}
+                            className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-emerald-500 transition-colors cursor-pointer"
+                          >
+                            <ChevronDown
+                              className={`w-3 h-3 transition-transform ${
+                                expandedSources.has(msg.message_id) ? "rotate-180" : ""
+                              }`}
+                              strokeWidth={1.5}
+                            />
+                            <span>
+                              {msg.sources.length} source{msg.sources.length !== 1 ? "s" : ""} cited
+                              {isMultiSource ? ` across ${uniqueTypes.length} types` : ""}
+                            </span>
+                          </button>
+
+                          {expandedSources.has(msg.message_id) && (
+                            <div className="mt-2 space-y-2">
+                              {msg.sources.map((source, i) => {
+                                const config = getSourceConfig(source.source_type);
+                                const Icon = config.icon;
+                                return (
+                                  <div
+                                    key={i}
+                                    className="p-2.5 rounded-sm bg-card border border-border text-xs flex items-start gap-2.5 font-mono shadow-2xs"
+                                  >
+                                    <div
+                                      className="w-5 h-5 rounded flex items-center justify-center shrink-0 mt-0.5"
+                                      style={{ background: `${config.color}15` }}
+                                    >
+                                      <Icon className="w-3 h-3" style={{ color: config.color }} strokeWidth={1.5} />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span
+                                          className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+                                          style={{ background: `${config.color}15`, color: config.color }}
+                                        >
+                                          {config.label}
+                                        </span>
+                                        <span className="text-[10px] text-muted-foreground font-mono shrink-0">
+                                          {Math.round(source.relevance_score * 100)}% match
+                                        </span>
+                                      </div>
+                                      <span className="text-foreground font-mono text-[11px] font-medium truncate block mt-1">
+                                        {source.source_id}
+                                      </span>
+                                      <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5 leading-relaxed">
+                                        {source.content_preview}
+                                      </p>
+                                      {source.source_url && (
+                                        <a
+                                          href={source.source_url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-[10px] text-emerald-500 hover:underline mt-1 inline-block"
+                                        >
+                                          View source →
+                                        </a>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              );
+            })
           )}
 
-          {/* Typing / Loading indicator */}
+          {/* AI Thinking Block while loading */}
           {isLoading && (
-            <div className="flex gap-3">
-              <div className="w-7 h-7 rounded-md bg-[rgba(16,185,129,0.1)] border border-[rgba(16,185,129,0.15)] flex items-center justify-center shrink-0 mt-0.5">
-                <Zap className="w-3.5 h-3.5 text-[#10b981] animate-pulse-subtle" strokeWidth={2} />
+            <div className="flex items-start gap-3.5 my-5">
+              <div className="w-8 h-8 rounded-sm bg-card border border-border flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">
+                <span className="font-mono font-bold text-xs text-foreground tracking-tight">
+                  AI
+                </span>
               </div>
-              <div className="flex items-center gap-2 py-2">
-                <Loader2 className="w-3.5 h-3.5 text-[#10b981] animate-spin" strokeWidth={2} />
-                <span className="text-xs text-[#525252] font-mono">Searching project memory...</span>
+              <div className="flex-1 max-w-[88%]">
+                <AIThinkingBlock
+                  query={messages.filter((m) => m.role === "user").slice(-1)[0]?.content}
+                />
               </div>
             </div>
           )}
@@ -319,48 +409,34 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {/* Suggested queries on bottom if few messages */}
-      {messages.length > 0 && messages.length <= 2 && (
-        <div className="shrink-0 px-6 pb-2">
-          <div className="max-w-2xl mx-auto">
-            <div className="flex flex-wrap gap-2">
-              {suggestedQueries.slice(0, 2).map((q) => (
-                <button
-                  key={q}
-                  onClick={() => handleSend(q)}
-                  className="px-3 py-1.5 rounded-md border border-[#1a1a1a] bg-[#0a0a0a] text-[12px] text-[#737373] hover:text-[#a3a3a3] hover:border-[#262626] transition-colors cursor-pointer"
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Input Form */}
-      <div className="shrink-0 px-6 py-3 border-t border-[#1a1a1a] bg-[#050505]">
-        <div className="max-w-2xl mx-auto">
-          <div className="flex items-center gap-2 surface-elevated rounded-lg px-3 py-1.5">
+      <div className="shrink-0 px-4 sm:px-6 py-4 border-t border-border bg-background">
+        <div className="max-w-3xl mx-auto">
+          <div className="flex items-center gap-2 bg-card border border-border rounded-lg px-4 py-2.5 shadow-2xs focus-within:border-ring transition-colors">
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Ask a question about your project..."
-              className="flex-1 bg-transparent border-none outline-none text-[13px] text-[#fafafa] placeholder:text-[#404040]"
+              className="flex-1 bg-transparent border-none outline-none font-mono text-xs sm:text-sm text-foreground placeholder:text-muted-foreground"
               disabled={isLoading}
             />
             <button
               onClick={() => handleSend()}
               disabled={!input.trim() || isLoading}
-              className="w-7 h-7 rounded-md flex items-center justify-center text-[#525252] hover:text-[#10b981] hover:bg-[rgba(16,185,129,0.08)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+              className="px-3.5 py-1.5 rounded-md bg-foreground text-background hover:opacity-90 font-mono text-xs font-semibold transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5 shrink-0"
             >
-              <Send className="w-3.5 h-3.5" strokeWidth={2} />
+              {isLoading ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Send className="w-3.5 h-3.5" />
+              )}
+              <span className="hidden sm:inline">Ask AI</span>
             </button>
           </div>
-          <p className="text-[10px] text-[#404040] mt-1.5 text-center">
-            Forge cites sources for every answer. Responses are grounded in your repository & chat data.
+          <p className="text-[11px] font-mono text-muted-foreground mt-2 text-center">
+            Forge AI grounding: Vector search across code, commits, decisions, & chat history.
           </p>
         </div>
       </div>

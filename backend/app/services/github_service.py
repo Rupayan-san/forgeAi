@@ -118,8 +118,170 @@ class GitHubIngestionService:
             if repo_name.endswith(".git"):
                 repo_name = repo_name[:-4]
             repo: Repository = self.gh.get_repo(repo_name)
+            total_chunks = 0
+
+            # 3. Ingest Repository Overview
+            try:
+                print(f"Ingesting repository overview for {repo_name}...")
+                overview_text = (
+                    f"Repository Overview: {repo.full_name}\n"
+                    f"Description: {repo.description or 'No description provided'}\n"
+                    f"Default Branch: {repo.default_branch}\n"
+                    f"Primary Language: {repo.language or 'Various'}\n"
+                    f"Stars: {repo.stargazers_count}, Forks: {repo.forks_count}, Open Issues: {repo.open_issues_count}\n"
+                    f"Created At: {repo.created_at.isoformat() if repo.created_at else ''}\n"
+                    f"Last Push: {repo.pushed_at.isoformat() if repo.pushed_at else ''}\n"
+                )
+                metadata = {
+                    "project_id": self.project_id,
+                    "url": repo.html_url,
+                }
+                overview_points = await self.embedding_service.chunk_and_embed(
+                    text=overview_text,
+                    source_type="readme",
+                    source_id="repo_overview",
+                    metadata=metadata
+                )
+                if overview_points:
+                    await qdrant_service.upsert_points(collection_name, overview_points)
+                    total_chunks += len(overview_points)
+            except Exception as e:
+                print(f"Error fetching repo overview for {repo_name}: {e}")
+
+            # 4. Ingest Git Commits (Latest 30 commits)
+            print(f"Fetching recent commits for {repo_name}...")
+            try:
+                commit_count = 0
+                for commit in repo.get_commits():
+                    commit_sha = commit.sha[:7]
+                    author_name = commit.author.login if commit.author else (commit.commit.author.name if commit.commit.author else "Unknown")
+                    commit_date = commit.commit.author.date.isoformat() if commit.commit.author and commit.commit.author.date else "Unknown date"
+                    commit_msg = commit.commit.message
+                    files_modified = [f.filename for f in (commit.files or [])[:10]]
+                    
+                    commit_text = (
+                        f"Commit SHA: {commit_sha} ({commit.sha})\n"
+                        f"Author: {author_name}\n"
+                        f"Date: {commit_date}\n"
+                        f"Commit Message: {commit_msg}\n"
+                        f"Modified Files: {', '.join(files_modified) if files_modified else 'None recorded'}"
+                    )
+                    
+                    metadata = {
+                        "project_id": self.project_id,
+                        "commit_sha": commit.sha,
+                        "author": author_name,
+                        "date": commit_date,
+                        "url": commit.html_url,
+                    }
+                    
+                    commit_points = await self.embedding_service.chunk_and_embed(
+                        text=commit_text,
+                        source_type="commit",
+                        source_id=f"commit_{commit_sha}",
+                        metadata=metadata
+                    )
+                    if commit_points:
+                        await qdrant_service.upsert_points(collection_name, commit_points)
+                        total_chunks += len(commit_points)
+                    
+                    commit_count += 1
+                    if commit_count >= 30:
+                        break
+                print(f"Ingested {commit_count} commits.")
+            except Exception as e:
+                print(f"Error fetching commits for {repo_name}: {e}")
+
+            # 5. Ingest Pull Requests
+            print(f"Fetching recent pull requests for {repo_name}...")
+            try:
+                pr_count = 0
+                for pr in repo.get_pulls(state="all", sort="created", direction="desc"):
+                    pr_author = pr.user.login if pr.user else "Unknown"
+                    pr_created = pr.created_at.isoformat() if pr.created_at else ""
+                    pr_merged = pr.merged_at.isoformat() if pr.merged_at else "Not merged"
+                    pr_body = pr.body or "No description provided"
+                    
+                    pr_text = (
+                        f"Pull Request #{pr.number}: {pr.title}\n"
+                        f"State: {pr.state} (Merged: {pr.is_merged()})\n"
+                        f"Author: {pr_author}\n"
+                        f"Created: {pr_created}\n"
+                        f"Merged At: {pr_merged}\n"
+                        f"Description:\n{pr_body[:1200]}"
+                    )
+                    
+                    metadata = {
+                        "project_id": self.project_id,
+                        "pr_number": pr.number,
+                        "author": pr_author,
+                        "url": pr.html_url,
+                    }
+                    
+                    pr_points = await self.embedding_service.chunk_and_embed(
+                        text=pr_text,
+                        source_type="pr",
+                        source_id=f"pr_{pr.number}",
+                        metadata=metadata
+                    )
+                    if pr_points:
+                        await qdrant_service.upsert_points(collection_name, pr_points)
+                        total_chunks += len(pr_points)
+                    
+                    pr_count += 1
+                    if pr_count >= 20:
+                        break
+                print(f"Ingested {pr_count} pull requests.")
+            except Exception as e:
+                print(f"Error fetching PRs for {repo_name}: {e}")
+
+            # 6. Ingest Issues
+            print(f"Fetching recent issues for {repo_name}...")
+            try:
+                issue_count = 0
+                for issue in repo.get_issues(state="all", sort="created", direction="desc"):
+                    if issue.pull_request:
+                        continue
+                    issue_author = issue.user.login if issue.user else "Unknown"
+                    issue_created = issue.created_at.isoformat() if issue.created_at else ""
+                    issue_body = issue.body or "No description provided"
+                    labels = [l.name for l in issue.labels]
+                    
+                    issue_text = (
+                        f"Issue #{issue.number}: {issue.title}\n"
+                        f"State: {issue.state}\n"
+                        f"Author: {issue_author}\n"
+                        f"Created: {issue_created}\n"
+                        f"Labels: {', '.join(labels) if labels else 'None'}\n"
+                        f"Description:\n{issue_body[:1200]}"
+                    )
+                    
+                    metadata = {
+                        "project_id": self.project_id,
+                        "issue_number": issue.number,
+                        "author": issue_author,
+                        "url": issue.html_url,
+                    }
+                    
+                    issue_points = await self.embedding_service.chunk_and_embed(
+                        text=issue_text,
+                        source_type="issue",
+                        source_id=f"issue_{issue.number}",
+                        metadata=metadata
+                    )
+                    if issue_points:
+                        await qdrant_service.upsert_points(collection_name, issue_points)
+                        total_chunks += len(issue_points)
+                        issue_count += 1
+                        
+                    if issue_count >= 20:
+                        break
+                print(f"Ingested {issue_count} issues.")
+            except Exception as e:
+                print(f"Error fetching issues for {repo_name}: {e}")
+
+            # 7. Fetch and process files
             contents = repo.get_contents("")
-            
             files_to_process = []
             while contents:
                 file_content = contents.pop(0)
@@ -129,16 +291,13 @@ class GitHubIngestionService:
                     if not self._should_ignore(file_content.path):
                         files_to_process.append(file_content)
 
-            # 4. Process files and generate embeddings
-            total_chunks = 0
             for file_content in files_to_process:
                 print(f"Processing {file_content.path}...")
                 try:
-                    # Content is usually base64 encoded by GitHub API
                     if file_content.encoding == "base64":
-                        decoded_content = base64.b64decode(file_content.content).decode("utf-8")
+                        decoded_content = base64.b64decode(file_content.content).decode("utf-8", errors="replace")
                     else:
-                        decoded_content = file_content.decoded_content.decode("utf-8")
+                        decoded_content = file_content.decoded_content.decode("utf-8", errors="replace")
                         
                     metadata = {
                         "project_id": self.project_id,
@@ -146,7 +305,7 @@ class GitHubIngestionService:
                         "url": file_content.html_url,
                     }
                     
-                    # Generate points
+                    # Generate points for code chunks
                     points = await self.embedding_service.chunk_and_embed(
                         text=decoded_content,
                         source_type="github_file",
@@ -157,20 +316,6 @@ class GitHubIngestionService:
                     if points:
                         await qdrant_service.upsert_points(collection_name, points)
                         total_chunks += len(points)
-                        
-                    # Generate and embed summary
-                    summary = await self._generate_summary(file_content.path, decoded_content)
-                    if summary:
-                        summary_points = await self.embedding_service.chunk_and_embed(
-                            text=summary,
-                            source_type="file_summary",
-                            source_id=f"{file_content.path}_summary",
-                            metadata=metadata
-                        )
-                        if summary_points:
-                            await qdrant_service.upsert_points(collection_name, summary_points)
-                            total_chunks += len(summary_points)
-                        
                 except Exception as e:
                     print(f"Error processing file {file_content.path}: {e}")
 

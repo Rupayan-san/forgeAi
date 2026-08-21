@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Zap, Loader2 } from "lucide-react";
+import { Zap, Loader2, ArrowLeft } from "lucide-react";
 import { GithubIcon } from "@/components/shared/github-icon";
 import { useAuthStore } from "@/store/use-auth-store";
 import Link from "next/link";
@@ -25,6 +25,14 @@ export default function LoginPage() {
 
   return (
     <div className="w-full max-w-sm">
+      <Link
+        href="/"
+        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mb-6 cursor-pointer"
+      >
+        <ArrowLeft className="w-3.5 h-3.5" />
+        Back to Home
+      </Link>
+
       {/* Logo */}
       <div className="text-center mb-8">
         <Link href="/" className="inline-flex items-center gap-2 mb-3">

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Link from "next/link";
 import {
   Loader2,
   Save,
@@ -21,6 +22,7 @@ import {
   Eye,
   EyeOff,
   ExternalLink,
+  ArrowLeft,
 } from "lucide-react";
 import { GithubIcon } from "@/components/shared/github-icon";
 import { DiscordIcon } from "@/components/shared/discord-icon";
@@ -173,25 +175,35 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="p-6 lg:p-8 max-w-[860px]">
+    <div className="flex-1 space-y-5 p-5 lg:p-6 max-w-[1400px] w-full mx-auto animate-fade-in bg-background text-foreground transition-colors duration-200">
       {/* Header */}
-      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-lg font-semibold text-[#fafafa] tracking-tight">Settings</h1>
-          <p className="text-[#525252] text-[13px] mt-0.5">
-            Manage project configuration, team members, and user credentials
-          </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border">
+        <div className="flex items-start gap-3 min-w-0">
+          <Link
+            href="/dashboard"
+            className="p-2 rounded-lg bg-card hover:bg-accent border border-border text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0 shadow-2xs mt-0.5"
+            title="Back to Dashboard"
+            aria-label="Back to Dashboard"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </Link>
+          <div className="min-w-0">
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground truncate">Settings</h1>
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+              Manage your workspace parameters, project integrations, team members, and API access
+            </p>
+          </div>
         </div>
         {projects.length > 1 && (
           <div className="flex items-center gap-2">
-            <span className="text-[12px] text-[#737373]">Project:</span>
+            <span className="text-xs text-muted-foreground">Project:</span>
             <select
               value={currentProject?.project_id || ""}
               onChange={(e) => {
                 const found = projects.find((p) => p.project_id === e.target.value);
                 if (found) setCurrentProject(found);
               }}
-              className="forge-input px-3 py-1.5 text-[12px] bg-[#141414] border border-[#262626] rounded-md text-[#fafafa]"
+              className="px-3 py-1.5 text-xs bg-card border border-border rounded-md text-foreground focus:outline-hidden focus:border-ring"
             >
               {projects.map((proj) => (
                 <option key={proj.project_id} value={proj.project_id}>
@@ -204,13 +216,13 @@ export default function SettingsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-[#1a1a1a] mb-6">
+      <div className="flex gap-2 border-b border-border">
         <button
           onClick={() => setActiveTab("general")}
-          className={`pb-3 px-3 text-[13px] font-medium transition-colors border-b-2 flex items-center gap-1.5 cursor-pointer ${
+          className={`pb-2.5 px-3 text-xs sm:text-sm font-medium transition-colors border-b-2 flex items-center gap-1.5 cursor-pointer ${
             activeTab === "general"
-              ? "border-[#10b981] text-[#fafafa]"
-              : "border-transparent text-[#525252] hover:text-[#a3a3a3]"
+              ? "border-emerald-500 text-foreground font-semibold"
+              : "border-transparent text-muted-foreground hover:text-foreground"
           }`}
         >
           <SettingsIcon className="w-3.5 h-3.5" strokeWidth={1.5} />
@@ -218,10 +230,10 @@ export default function SettingsPage() {
         </button>
         <button
           onClick={() => setActiveTab("team")}
-          className={`pb-3 px-3 text-[13px] font-medium transition-colors border-b-2 flex items-center gap-1.5 cursor-pointer ${
+          className={`pb-2.5 px-3 text-xs sm:text-sm font-medium transition-colors border-b-2 flex items-center gap-1.5 cursor-pointer ${
             activeTab === "team"
-              ? "border-[#10b981] text-[#fafafa]"
-              : "border-transparent text-[#525252] hover:text-[#a3a3a3]"
+              ? "border-emerald-500 text-foreground font-semibold"
+              : "border-transparent text-muted-foreground hover:text-foreground"
           }`}
         >
           <Users className="w-3.5 h-3.5" strokeWidth={1.5} />
@@ -229,10 +241,10 @@ export default function SettingsPage() {
         </button>
         <button
           onClick={() => setActiveTab("account")}
-          className={`pb-3 px-3 text-[13px] font-medium transition-colors border-b-2 flex items-center gap-1.5 cursor-pointer ${
+          className={`pb-2.5 px-3 text-xs sm:text-sm font-medium transition-colors border-b-2 flex items-center gap-1.5 cursor-pointer ${
             activeTab === "account"
-              ? "border-[#10b981] text-[#fafafa]"
-              : "border-transparent text-[#525252] hover:text-[#a3a3a3]"
+              ? "border-emerald-500 text-foreground font-semibold"
+              : "border-transparent text-muted-foreground hover:text-foreground"
           }`}
         >
           <User className="w-3.5 h-3.5" strokeWidth={1.5} />
@@ -242,34 +254,34 @@ export default function SettingsPage() {
 
       {/* Tab 1: General Settings */}
       {activeTab === "general" && (
-        <form onSubmit={handleSave} className="space-y-6">
-          <div className="surface p-5 space-y-4">
-            <h2 className="text-[13px] font-medium text-[#a3a3a3] border-b border-[#1a1a1a] pb-3">
+        <form onSubmit={handleSave} className="space-y-4.5 max-w-3xl">
+          <div className="bg-card border border-border rounded-xl p-4.5 space-y-3.5 shadow-2xs">
+            <h2 className="text-xs sm:text-sm font-bold text-foreground border-b border-border pb-2.5">
               General Information
             </h2>
 
-            <div className="space-y-1.5">
-              <label className="block text-[12px] text-[#525252] font-medium">Project Name</label>
+            <div className="space-y-1">
+              <label className="block text-xs text-muted-foreground font-medium">Project Name</label>
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="forge-input w-full px-3 py-2 text-[13px]"
+                className="w-full px-3 py-2 text-xs sm:text-sm bg-background border border-border rounded-md text-foreground focus:outline-hidden focus:border-ring"
                 required
               />
             </div>
 
-            <div className="space-y-1.5">
-              <label className="block text-[12px] text-[#525252] font-medium">Description</label>
+            <div className="space-y-1">
+              <label className="block text-xs text-muted-foreground font-medium">Description</label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="forge-input w-full px-3 py-2 text-[13px] min-h-[80px]"
+                className="w-full px-3 py-2 text-xs sm:text-sm bg-background border border-border rounded-md text-foreground focus:outline-hidden focus:border-ring min-h-[80px]"
               />
             </div>
 
-            <div className="space-y-1.5">
-              <label className="block text-[12px] text-[#525252] font-medium">Maximum Members Allowed</label>
+            <div className="space-y-1">
+              <label className="block text-xs text-muted-foreground font-medium">Maximum Members Allowed</label>
               <input
                 type="number"
                 min={1}
@@ -277,33 +289,33 @@ export default function SettingsPage() {
                 value={maxMembers}
                 onChange={(e) => setMaxMembers(Math.max(1, Number(e.target.value)))}
                 disabled={!isOwner}
-                className="forge-input w-full px-3 py-2 text-[13px] disabled:opacity-40"
+                className="w-full px-3 py-2 text-xs sm:text-sm bg-background border border-border rounded-md text-foreground focus:outline-hidden focus:border-ring disabled:opacity-40"
               />
             </div>
           </div>
 
-          <div className="surface p-5 space-y-4">
-            <h2 className="text-[13px] font-medium text-[#a3a3a3] border-b border-[#1a1a1a] pb-3">
+          <div className="bg-card border border-border rounded-xl p-4.5 space-y-3.5 shadow-2xs">
+            <h2 className="text-xs sm:text-sm font-bold text-foreground border-b border-border pb-2.5">
               Connected Sources
             </h2>
 
-            <div className="space-y-1.5">
-              <label className="block text-[12px] text-[#525252] font-medium">GitHub Repository URL</label>
+            <div className="space-y-1">
+              <label className="block text-xs text-muted-foreground font-medium">GitHub Repository URL</label>
               <input
                 type="url"
                 value={githubRepoUrl}
                 onChange={(e) => setGithubRepoUrl(e.target.value)}
                 placeholder="https://github.com/owner/repo"
-                className="forge-input w-full px-3 py-2 text-[13px]"
+                className="w-full px-3 py-2 text-xs sm:text-sm bg-background border border-border rounded-md text-foreground focus:outline-hidden focus:border-ring font-mono"
               />
-              <p className="text-[11px] text-[#525252]">
+              <p className="text-[11px] text-muted-foreground">
                 Changing this requires triggering GitHub Sync on the project overview page.
               </p>
             </div>
 
-            <div className="space-y-2 pt-3 border-t border-white/5">
+            <div className="space-y-2 pt-2 border-t border-border">
               <div className="flex items-center justify-between">
-                <label className="block text-[12px] text-[#525252] font-medium flex items-center gap-1.5">
+                <label className="block text-xs text-muted-foreground font-medium flex items-center gap-1.5">
                   <DiscordIcon size={14} className="text-[#5865F2]" />
                   Discord Server ID (Guild ID)
                 </label>
@@ -311,7 +323,7 @@ export default function SettingsPage() {
                   href="https://discord.com/oauth2/authorize?permissions=68608&scope=bot%20applications.commands"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-[11px] text-[#5865F2] hover:text-[#7983f5] transition-colors"
+                  className="inline-flex items-center gap-1 text-xs text-[#5865F2] hover:underline"
                 >
                   Invite Bot to Server
                   <ExternalLink className="w-3 h-3" />
@@ -322,9 +334,9 @@ export default function SettingsPage() {
                 value={discordGuildId}
                 onChange={(e) => setDiscordGuildId(e.target.value)}
                 placeholder="e.g. 123456789012345678"
-                className="forge-input w-full px-3 py-2 text-[13px] font-mono"
+                className="w-full px-3 py-2 text-xs sm:text-sm bg-background border border-border rounded-md text-foreground focus:outline-hidden focus:border-ring font-mono"
               />
-              <p className="text-[11px] text-[#525252]">
+              <p className="text-[11px] text-muted-foreground">
                 Enable Developer Mode in Discord (User Settings &gt; Advanced &gt; Developer Mode), right-click your server name, and select &quot;Copy Server ID&quot;.
               </p>
             </div>
@@ -334,7 +346,7 @@ export default function SettingsPage() {
             <button
               type="submit"
               disabled={isSaving}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-[#10b981] hover:bg-[#059669] text-white text-[13px] font-medium transition-colors disabled:opacity-40 cursor-pointer"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-emerald-500 hover:bg-emerald-600 text-white text-xs sm:text-sm font-semibold transition-colors disabled:opacity-40 cursor-pointer shadow-xs"
             >
               {isSaving ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={2} />
@@ -345,7 +357,7 @@ export default function SettingsPage() {
             </button>
 
             {message && (
-              <span className={`text-[12px] font-medium ${message.includes("Failed") ? "text-red-400" : "text-emerald-400"}`}>
+              <span className={`text-xs font-medium ${message.includes("Failed") ? "text-rose-500" : "text-emerald-500"}`}>
                 {message}
               </span>
             )}
@@ -355,56 +367,56 @@ export default function SettingsPage() {
 
       {/* Tab 2: Team Management */}
       {activeTab === "team" && (
-        <div className="space-y-6">
+        <div className="space-y-4.5 max-w-3xl">
           {isOwner && currentProject && (
             <>
               {/* Join Code */}
-              <div className="surface p-5">
-                <h2 className="text-[13px] font-medium text-[#a3a3a3] mb-1.5">Project Join Code</h2>
-                <p className="text-[12px] text-[#525252] mb-4">
+              <div className="bg-card border border-border rounded-xl p-4.5 shadow-2xs">
+                <h2 className="text-xs sm:text-sm font-bold text-foreground mb-1">Project Join Code</h2>
+                <p className="text-xs text-muted-foreground mb-3">
                   Share this 6-character code with your team members to request access.
                 </p>
-                <div className="flex items-center gap-3 bg-[#0d0d0d] p-3 rounded-lg border border-[#1a1a1a] w-fit">
-                  <span className="text-2xl font-mono tracking-widest text-[#10b981] font-bold">
+                <div className="flex items-center gap-3 bg-background p-3 rounded-lg border border-border w-fit">
+                  <span className="text-2xl font-mono tracking-widest text-emerald-600 dark:text-emerald-500 font-bold">
                     {currentProject.join_code || "------"}
                   </span>
                   <button
                     onClick={copyJoinCode}
-                    className="p-1.5 rounded bg-[#171717] hover:bg-[#222222] text-[#fafafa] transition-colors cursor-pointer"
+                    className="p-1.5 rounded bg-secondary text-secondary-foreground hover:bg-accent transition-colors cursor-pointer"
                     title="Copy Join Code"
                   >
-                    {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-[#737373]" />}
+                    {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4 text-muted-foreground" />}
                   </button>
                 </div>
               </div>
 
               {/* Pending Requests */}
-              <div className="surface p-5">
-                <h2 className="text-[13px] font-medium text-[#a3a3a3] mb-3">Pending Join Requests</h2>
+              <div className="bg-card border border-border rounded-xl p-4.5 shadow-2xs">
+                <h2 className="text-xs sm:text-sm font-bold text-foreground mb-2.5">Pending Join Requests</h2>
                 {pendingRequests.length === 0 ? (
-                  <p className="text-[12px] text-[#525252]">No pending requests at this time.</p>
+                  <p className="text-xs text-muted-foreground">No pending requests at this time.</p>
                 ) : (
                   <div className="space-y-2">
                     {pendingRequests.map((req) => (
                       <div
                         key={req.request_id}
-                        className="flex items-center justify-between p-2.5 rounded-md bg-[#0a0a0a] border border-[#1a1a1a]"
+                        className="flex items-center justify-between p-2.5 rounded-lg bg-background border border-border"
                       >
                         <div>
-                          <p className="text-[#fafafa] font-medium text-[13px]">{req.user_name}</p>
-                          <p className="text-[#525252] text-[11px]">@{req.github_username}</p>
+                          <p className="text-foreground font-semibold text-xs sm:text-sm">{req.user_name}</p>
+                          <p className="text-muted-foreground text-[11px] font-mono">@{req.github_username}</p>
                         </div>
                         <div className="flex items-center gap-1.5">
                           <button
                             onClick={() => handleRequestAction(req.request_id, "approve")}
-                            className="p-1.5 rounded bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors cursor-pointer"
+                            className="p-1.5 rounded bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-colors cursor-pointer"
                             title="Approve"
                           >
                             <Check className="w-3.5 h-3.5" />
                           </button>
                           <button
                             onClick={() => handleRequestAction(req.request_id, "reject")}
-                            className="p-1.5 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors cursor-pointer"
+                            className="p-1.5 rounded bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 transition-colors cursor-pointer"
                             title="Reject"
                           >
                             <X className="w-3.5 h-3.5" />
@@ -417,28 +429,28 @@ export default function SettingsPage() {
               </div>
 
               {/* Invite Member */}
-              <div className="surface p-5">
-                <h2 className="text-[13px] font-medium text-[#a3a3a3] mb-3">Direct Invite</h2>
-                <form onSubmit={handleInvite} className="flex flex-col gap-2.5">
+              <div className="bg-card border border-border rounded-xl p-4.5 shadow-2xs">
+                <h2 className="text-xs sm:text-sm font-bold text-foreground mb-2.5">Direct Invite</h2>
+                <form onSubmit={handleInvite} className="flex flex-col gap-2">
                   <div className="flex gap-2">
                     <input
                       type="text"
                       value={inviteUsername}
                       onChange={(e) => setInviteUsername(e.target.value)}
                       placeholder="GitHub username"
-                      className="forge-input flex-1 px-3 py-2 text-[13px]"
+                      className="flex-1 px-3 py-2 text-xs sm:text-sm bg-background border border-border rounded-md text-foreground focus:outline-hidden focus:border-ring"
                     />
                     <button
                       type="submit"
                       disabled={isInviting || !inviteUsername.trim()}
-                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-[#10b981] hover:bg-[#059669] text-white text-[13px] font-medium transition-colors disabled:opacity-40 cursor-pointer"
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-emerald-500 hover:bg-emerald-600 text-white text-xs sm:text-sm font-semibold transition-colors disabled:opacity-40 cursor-pointer shadow-xs"
                     >
                       {isInviting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
                       Invite
                     </button>
                   </div>
                   {inviteMessage && (
-                    <span className={`text-[12px] ${inviteMessage.includes("Failed") ? "text-red-400" : "text-emerald-400"}`}>
+                    <span className={`text-xs ${inviteMessage.includes("Failed") ? "text-rose-500" : "text-emerald-500"}`}>
                       {inviteMessage}
                     </span>
                   )}
@@ -448,19 +460,19 @@ export default function SettingsPage() {
           )}
 
           {/* Members List */}
-          <div className="surface p-5">
-            <h2 className="text-[13px] font-medium text-[#a3a3a3] mb-3">
+          <div className="bg-card border border-border rounded-xl p-4.5 shadow-2xs">
+            <h2 className="text-xs sm:text-sm font-bold text-foreground mb-2.5">
               Project Members ({currentProject?.members?.length || 0})
             </h2>
             <div className="space-y-1.5">
               {currentProject?.members?.map((memberId) => (
                 <div
                   key={memberId}
-                  className="p-2.5 rounded-md bg-[#0a0a0a] border border-[#1a1a1a] flex items-center justify-between"
+                  className="p-2.5 rounded-lg bg-background border border-border flex items-center justify-between"
                 >
-                  <span className="text-[#fafafa] text-[13px] font-medium">{memberId}</span>
+                  <span className="text-foreground text-xs sm:text-sm font-semibold">{memberId}</span>
                   {memberId === currentProject.owner_id && (
-                    <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded font-mono font-medium">
+                    <span className="text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-500 px-2 py-0.5 rounded border border-emerald-500/20 font-mono font-semibold">
                       Owner
                     </span>
                   )}
@@ -473,90 +485,90 @@ export default function SettingsPage() {
 
       {/* Tab 3: Account & Credentials */}
       {activeTab === "account" && (
-        <div className="space-y-6">
+        <div className="space-y-4.5 max-w-3xl">
           {/* Profile */}
-          <div className="surface overflow-hidden">
-            <div className="px-5 py-3 border-b border-[#1a1a1a]">
-              <h2 className="text-[13px] font-medium text-[#a3a3a3] flex items-center gap-2">
+          <div className="bg-card border border-border rounded-xl overflow-hidden shadow-2xs">
+            <div className="px-4.5 py-3 border-b border-border">
+              <h2 className="text-xs sm:text-sm font-bold text-foreground flex items-center gap-2">
                 <User className="w-3.5 h-3.5" strokeWidth={1.5} />
                 Profile
               </h2>
             </div>
-            <div className="p-5">
+            <div className="p-4.5">
               <div className="flex items-center gap-4">
                 {user?.avatar_url ? (
                   <img
                     src={user.avatar_url}
                     alt={user.name || ""}
-                    className="w-12 h-12 rounded-md border border-[#262626]"
+                    className="w-12 h-12 rounded-lg border border-border"
                   />
                 ) : (
-                  <div className="w-12 h-12 rounded-md bg-[#171717] border border-[#262626] flex items-center justify-center text-sm font-bold text-white">
+                  <div className="w-12 h-12 rounded-lg bg-accent border border-border flex items-center justify-center text-sm font-bold text-foreground">
                     {(user?.name || "??").substring(0, 2).toUpperCase()}
                   </div>
                 )}
                 <div>
-                  <p className="text-[14px] font-medium text-[#fafafa]">
+                  <p className="text-sm font-semibold text-foreground">
                     {user?.name || "—"}
                   </p>
-                  <p className="text-[12px] text-[#525252]">@{user?.github_username || "—"}</p>
-                  <p className="text-[11px] text-[#404040] mt-0.5">{user?.email || "No email"}</p>
+                  <p className="text-xs text-muted-foreground">@{user?.github_username || "—"}</p>
+                  <p className="text-[11px] text-muted-foreground/75 mt-0.5">{user?.email || "No email"}</p>
                 </div>
               </div>
             </div>
           </div>
 
           {/* API Key section */}
-          <div className="surface overflow-hidden">
-            <div className="px-5 py-3 border-b border-[#1a1a1a]">
-              <h2 className="text-[13px] font-medium text-[#a3a3a3] flex items-center gap-2">
+          <div className="bg-card border border-border rounded-xl overflow-hidden shadow-2xs">
+            <div className="px-4.5 py-3 border-b border-border">
+              <h2 className="text-xs sm:text-sm font-bold text-foreground flex items-center gap-2">
                 <Shield className="w-3.5 h-3.5" strokeWidth={1.5} />
                 API Access
               </h2>
             </div>
-            <div className="p-5">
-              <p className="text-[12px] text-[#525252] mb-3">
+            <div className="p-4.5">
+              <p className="text-xs text-muted-foreground mb-3">
                 Use this API key to interact with Forge programmatically via HTTP requests.
               </p>
               <div className="flex items-center gap-2">
-                <div className="flex-1 forge-input px-3 py-2 text-[12px] font-mono flex items-center">
+                <div className="flex-1 px-3 py-2 text-xs font-mono bg-background border border-border rounded-md text-foreground flex items-center">
                   {showApiKey ? mockApiKey : "forge_sk_••••••••••••••••••••"}
                 </div>
                 <button
                   onClick={() => setShowApiKey(!showApiKey)}
-                  className="w-8 h-8 rounded-md flex items-center justify-center text-[#525252] hover:text-[#737373] hover:bg-[#111111] transition-colors cursor-pointer"
+                  className="w-8 h-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer border border-border"
                   title={showApiKey ? "Hide Key" : "Show Key"}
                 >
                   {showApiKey ? <EyeOff className="w-3.5 h-3.5" strokeWidth={1.5} /> : <Eye className="w-3.5 h-3.5" strokeWidth={1.5} />}
                 </button>
                 <button
                   onClick={copyApiKey}
-                  className="w-8 h-8 rounded-md flex items-center justify-center text-[#525252] hover:text-[#10b981] hover:bg-[#111111] transition-colors cursor-pointer"
+                  className="w-8 h-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-emerald-500 hover:bg-accent transition-colors cursor-pointer border border-border"
                   title="Copy API Key"
                 >
-                  {apiKeyCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" strokeWidth={1.5} />}
+                  {apiKeyCopied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" strokeWidth={1.5} />}
                 </button>
               </div>
             </div>
           </div>
 
           {/* Danger zone */}
-          <div className="surface overflow-hidden border-[rgba(239,68,68,0.2)]">
-            <div className="px-5 py-3 border-b border-[rgba(239,68,68,0.1)]">
-              <h2 className="text-[13px] font-medium text-[#ef4444] flex items-center gap-2">
+          <div className="bg-card border border-rose-500/30 rounded-xl overflow-hidden shadow-2xs">
+            <div className="px-4.5 py-3 border-b border-rose-500/20 bg-rose-500/5">
+              <h2 className="text-xs sm:text-sm font-bold text-rose-500 flex items-center gap-2">
                 <AlertTriangle className="w-3.5 h-3.5" strokeWidth={1.5} />
                 Danger Zone
               </h2>
             </div>
-            <div className="p-5">
+            <div className="p-4.5">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-[13px] text-[#fafafa]">Delete Account</p>
-                  <p className="text-[11px] text-[#525252]">
+                  <p className="text-xs sm:text-sm font-semibold text-foreground">Delete Account</p>
+                  <p className="text-xs text-muted-foreground">
                     Permanently delete your user account and access tokens
                   </p>
                 </div>
-                <button className="px-3 py-1.5 rounded-md border border-[rgba(239,68,68,0.3)] text-[#ef4444] text-[12px] font-medium hover:bg-[rgba(239,68,68,0.08)] transition-colors cursor-pointer">
+                <button className="px-3 py-1.5 rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-500 text-xs font-semibold hover:bg-rose-500/20 transition-colors cursor-pointer">
                   Delete
                 </button>
               </div>
