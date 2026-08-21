@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Plus,
   Zap,
@@ -261,6 +262,7 @@ function CreateProjectDialog({
 }
 
 function ProjectRow({ project }: { project: Project }) {
+  const router = useRouter();
   const { deleteProject } = useProjectStore();
   const [deleting, setDeleting] = useState(false);
 
@@ -283,61 +285,62 @@ function ProjectRow({ project }: { project: Project }) {
     project.ingestion_status.discord_chunks_count;
 
   return (
-    <Link href={`/project/${project.project_id}`}>
-      <tr className="group cursor-pointer">
-        <td>
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-md bg-[#111111] border border-[#1a1a1a] flex items-center justify-center shrink-0">
-              <Folder className="w-3.5 h-3.5 text-[#525252]" strokeWidth={1.5} />
-            </div>
-            <div>
-              <span className="text-[#fafafa] text-[13px] font-medium group-hover:text-[#10b981] transition-colors">
-                {project.name}
-              </span>
-            </div>
+    <tr
+      onClick={() => router.push(`/project/${project.project_id}`)}
+      className="group cursor-pointer"
+    >
+      <td>
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-md bg-[#111111] border border-[#1a1a1a] flex items-center justify-center shrink-0">
+            <Folder className="w-3.5 h-3.5 text-[#525252]" strokeWidth={1.5} />
           </div>
-        </td>
-        <td>
-          {project.github_repo_name ? (
-            <span className="text-[#525252] text-[12px] font-mono">{project.github_repo_name}</span>
-          ) : (
-            <span className="text-[#404040] text-[12px]">—</span>
-          )}
-        </td>
-        <td>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5">
-              <div className={`status-dot ${githubReady ? "status-dot-success" : "status-dot-idle"}`} />
-              <span className="text-[11px] text-[#525252]">GitHub</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className={`status-dot ${discordReady ? "status-dot-success" : "status-dot-idle"}`} />
-              <span className="text-[11px] text-[#525252]">Discord</span>
-            </div>
+          <div>
+            <span className="text-[#fafafa] text-[13px] font-medium group-hover:text-[#10b981] transition-colors">
+              {project.name}
+            </span>
           </div>
-        </td>
-        <td>
-          <span className="text-[#737373] text-[13px] font-mono">{totalChunks.toLocaleString()}</span>
-        </td>
-        <td>
-          <span className="text-[#525252] text-[12px]">
-            {project.members.length} member{project.members.length !== 1 ? "s" : ""}
-          </span>
-        </td>
-        <td>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={handleDelete}
-              disabled={deleting}
-              className="opacity-0 group-hover:opacity-100 w-6 h-6 rounded flex items-center justify-center text-[#525252] hover:text-[#ef4444] hover:bg-[rgba(239,68,68,0.08)] transition-all cursor-pointer"
-            >
-              <Trash2 className="w-3 h-3" strokeWidth={1.5} />
-            </button>
-            <ChevronRight className="w-3.5 h-3.5 text-[#404040] group-hover:text-[#737373] transition-colors" strokeWidth={1.5} />
+        </div>
+      </td>
+      <td>
+        {project.github_repo_name ? (
+          <span className="text-[#525252] text-[12px] font-mono">{project.github_repo_name}</span>
+        ) : (
+          <span className="text-[#404040] text-[12px]">—</span>
+        )}
+      </td>
+      <td>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <div className={`status-dot ${githubReady ? "status-dot-success" : "status-dot-idle"}`} />
+            <span className="text-[11px] text-[#525252]">GitHub</span>
           </div>
-        </td>
-      </tr>
-    </Link>
+          <div className="flex items-center gap-1.5">
+            <div className={`status-dot ${discordReady ? "status-dot-success" : "status-dot-idle"}`} />
+            <span className="text-[11px] text-[#525252]">Discord</span>
+          </div>
+        </div>
+      </td>
+      <td>
+        <span className="text-[#737373] text-[13px] font-mono">{totalChunks.toLocaleString()}</span>
+      </td>
+      <td>
+        <span className="text-[#525252] text-[12px]">
+          {project.members.length} member{project.members.length !== 1 ? "s" : ""}
+        </span>
+      </td>
+      <td>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="opacity-0 group-hover:opacity-100 w-6 h-6 rounded flex items-center justify-center text-[#525252] hover:text-[#ef4444] hover:bg-[rgba(239,68,68,0.08)] transition-all cursor-pointer"
+          >
+            <Trash2 className="w-3 h-3" strokeWidth={1.5} />
+          </button>
+          <ChevronRight className="w-3.5 h-3.5 text-[#404040] group-hover:text-[#737373] transition-colors" strokeWidth={1.5} />
+        </div>
+      </td>
+    </tr>
   );
 }
 

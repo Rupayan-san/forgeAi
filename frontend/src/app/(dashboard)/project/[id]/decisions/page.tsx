@@ -4,21 +4,25 @@ import React, { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import {
   FileText,
-  GitPullRequest,
-  GitCommit,
-  Hash,
   ChevronDown,
   ChevronUp,
   Filter,
   List,
   Clock,
   Users,
-  AlertCircle,
   Sparkles,
   Loader2,
-  FileCode2,
+  AlertTriangle,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { getSourceConfig } from "@/lib/sourceTypes";
+
+interface ConflictInfo {
+  other_decision_id: string;
+  other_decision_text: string;
+  relationship: "conflict" | "supersedes";
+  explanation: string;
+}
 
 interface Decision {
   decision_id: string;
@@ -33,18 +37,8 @@ interface Decision {
   timestamp?: string;
   extracted_at?: string;
   confidence_score?: number;
+  conflicts?: ConflictInfo[];
 }
-
-const sourceTypeConfig: Record<string, { icon: any; label: string; color: string }> = {
-  pr: { icon: GitPullRequest, label: "Pull Request", color: "#3b82f6" },
-  github_pr: { icon: GitPullRequest, label: "Pull Request", color: "#3b82f6" },
-  commit: { icon: GitCommit, label: "Commit", color: "#10b981" },
-  github_commit: { icon: GitCommit, label: "Commit", color: "#10b981" },
-  discord: { icon: Hash, label: "Discord", color: "#a855f7" },
-  discord_message: { icon: Hash, label: "Discord", color: "#a855f7" },
-  github_file: { icon: FileCode2, label: "File", color: "#6366f1" },
-  issue: { icon: AlertCircle, label: "Issue", color: "#f59e0b" },
-};
 
 export default function DecisionsPage() {
   const params = useParams();
@@ -54,6 +48,8 @@ export default function DecisionsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractMessage, setExtractMessage] = useState("");
+  const [isDetectingConflicts, setIsDetectingConflicts] = useState(false);
+  const [conflictMessage, setConflictMessage] = useState("");
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [view, setView] = useState<"timeline" | "table">("timeline");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
@@ -95,6 +91,24 @@ export default function DecisionsPage() {
     }
   };
 
+  const handleDetectConflicts = async () => {
+    setIsDetectingConflicts(true);
+    setConflictMessage("");
+    try {
+      const result = await api.post<{ message: string; count: number }>(
+        `/projects/${projectId}/decisions/detect-conflicts`
+      );
+      setConflictMessage(result.message || "Conflict detection complete");
+      await fetchDecisions();
+    } catch (err) {
+      console.error(err);
+      setConflictMessage("Failed to detect conflicts.");
+    } finally {
+      setIsDetectingConflicts(false);
+      setTimeout(() => setConflictMessage(""), 5000);
+    }
+  };
+
   const toggleExpand = (id: string) => {
     setExpandedIds((prev) => {
       const next = new Set(prev);
@@ -113,14 +127,7 @@ export default function DecisionsPage() {
     return norm === sourceFilter;
   });
 
-  const getSourceConfig = (type: string) => {
-    const key = (type || "").toLowerCase();
-    return sourceTypeConfig[key] || {
-      icon: FileText,
-      label: type || "Document",
-      color: "#737373",
-    };
-  };
+
 
   return (
     <div className="p-6 lg:p-8 max-w-[1200px]">
@@ -139,6 +146,12 @@ export default function DecisionsPage() {
             </span>
           )}
 
+          {conflictMessage && (
+            <span className="text-[12px] text-amber-400 font-mono animate-pulse">
+              {conflictMessage}
+            </span>
+          )}
+
           {/* Extract Button */}
           <button
             onClick={handleExtract}
@@ -151,6 +164,21 @@ export default function DecisionsPage() {
               <Sparkles className="w-3.5 h-3.5" strokeWidth={2} />
             )}
             Extract Decisions
+          </button>
+
+          {/* Detect Conflicts Button */}
+          <button
+            onClick={handleDetectConflicts}
+            disabled={isDetectingConflicts || decisions.length < 2}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[#262626] text-[#fafafa] text-[13px] font-medium hover:bg-[#141414] transition-colors disabled:opacity-40 cursor-pointer"
+            title={decisions.length < 2 ? "Need at least 2 decisions" : "Scan for contradicting decisions"}
+          >
+            {isDetectingConflicts ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={2} />
+            ) : (
+              <AlertTriangle className="w-3.5 h-3.5" strokeWidth={2} />
+            )}
+            Detect Conflicts
           </button>
 
           {/* View toggle */}
@@ -256,9 +284,20 @@ export default function DecisionsPage() {
                   {/* Content */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-3 mb-1.5">
-                      <h3 className="text-[14px] font-medium text-[#fafafa] leading-snug">
-                        {decision.decision_text}
-                      </h3>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-[14px] font-medium text-[#fafafa] leading-snug">
+                          {decision.decision_text}
+                        </h3>
+                        {decision.conflicts && decision.conflicts.length > 0 && (
+                          <span
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/25 text-[10px] text-red-400 font-medium shrink-0"
+                            title={decision.conflicts.map((c) => c.explanation).join(" | ")}
+                          >
+                            <AlertTriangle className="w-3 h-3" strokeWidth={2} />
+                            {decision.conflicts[0].relationship === "conflict" ? "Conflicts" : "Superseded"}
+                          </span>
+                        )}
+                      </div>
                       <button
                         onClick={() => toggleExpand(decision.decision_id)}
                         className="text-[#525252] hover:text-[#fafafa] transition-colors p-1 rounded cursor-pointer shrink-0"
@@ -291,6 +330,24 @@ export default function DecisionsPage() {
                             </span>
                           ))}
                         </div>
+                      </div>
+                    )}
+
+                    {/* Conflict Explanation Block */}
+                    {decision.conflicts && decision.conflicts.length > 0 && (
+                      <div className="mb-3 p-2.5 rounded-md bg-red-500/5 border border-red-500/20">
+                        <p className="text-[10px] text-red-400 uppercase tracking-wider font-medium mb-1.5 flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3" strokeWidth={2} />
+                          Conflicting with {decision.conflicts.length} other decision{decision.conflicts.length !== 1 ? "s" : ""}
+                        </p>
+                        {decision.conflicts.map((c, idx) => (
+                          <div key={idx} className="text-[11px] text-[#a3a3a3] mb-1 last:mb-0">
+                            <span className="text-red-400 font-medium">
+                              {c.relationship === "conflict" ? "Conflicts with" : "Superseded by"}:
+                            </span>{" "}
+                            &ldquo;{c.other_decision_text}&rdquo; — {c.explanation}
+                          </div>
+                        ))}
                       </div>
                     )}
 

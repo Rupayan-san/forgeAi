@@ -5,11 +5,6 @@ import { useParams } from "next/navigation";
 import {
   Send,
   Loader2,
-  GitPullRequest,
-  GitCommit,
-  Hash,
-  FileText,
-  FileCode2,
   ChevronDown,
   Zap,
   User,
@@ -17,6 +12,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { getSourceConfig, summarizeSourceTypes } from "@/lib/sourceTypes";
+import EnterpriseAIPipeline from "@/components/ui/ai-agent-pipeline";
 
 interface SourceCitation {
   source_type: string;
@@ -32,6 +29,7 @@ interface ChatMessage {
   sources: SourceCitation[];
   created_at: string;
   role: "user" | "assistant";
+  trace?: string[];
 }
 
 const suggestedQueries = [
@@ -115,6 +113,7 @@ export default function ChatPage() {
         content: string;
         sources: SourceCitation[];
         created_at: string;
+        trace?: string[];
       }>(`/projects/${projectId}/chat`, {
         message: userMessage.content,
         interface_type: "text",
@@ -124,6 +123,7 @@ export default function ChatPage() {
         ...response,
         role: "assistant",
         sources: response.sources || [],
+        trace: response.trace || [],
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -151,23 +151,7 @@ export default function ChatPage() {
     }
   };
 
-  const getSourceIcon = (type: string) => {
-    switch (type?.toLowerCase()) {
-      case "pr":
-      case "github_pr":
-        return GitPullRequest;
-      case "commit":
-      case "github_commit":
-        return GitCommit;
-      case "discord":
-      case "discord_message":
-        return Hash;
-      case "github_file":
-        return FileCode2;
-      default:
-        return FileText;
-    }
-  };
+
 
   return (
     <div className="flex flex-col h-[calc(100vh-56px)] lg:h-screen bg-[#050505]">
@@ -238,59 +222,107 @@ export default function ChatPage() {
                     {msg.content}
                   </p>
 
-                  {/* Sources */}
-                  {msg.role === "assistant" && msg.sources && msg.sources.length > 0 && (
-                    <div className="mt-2.5 pt-2.5 border-t border-white/5">
-                      <button
-                        onClick={() => toggleSources(msg.message_id)}
-                        className="flex items-center gap-1.5 text-[11px] text-[#525252] hover:text-[#10b981] transition-colors cursor-pointer"
-                      >
-                        <ChevronDown
-                          className={`w-3 h-3 transition-transform ${
-                            expandedSources.has(msg.message_id) ? "rotate-180" : ""
-                          }`}
-                          strokeWidth={1.5}
-                        />
-                        <span>
-                          {msg.sources.length} source{msg.sources.length !== 1 ? "s" : ""} cited
-                        </span>
-                      </button>
+                  {/* Real agent trace — only show for assistant messages that have one */}
+                  {msg.role === "assistant" && msg.trace && msg.trace.length > 0 && (
+                    <details className="mt-2 mb-1 group">
+                      <summary className="cursor-pointer text-[11px] text-[#525252] hover:text-[#10b981] transition-colors list-none flex items-center gap-1.5">
+                        <Bot className="w-3 h-3" strokeWidth={2} />
+                        <span>View agent reasoning trace</span>
+                      </summary>
+                      <div className="mt-2">
+                        <EnterpriseAIPipeline messages={msg.trace} className="!max-w-full" />
+                      </div>
+                    </details>
+                  )}
 
-                      {expandedSources.has(msg.message_id) && (
-                        <div className="mt-2 space-y-1.5">
-                          {msg.sources.map((source, i) => {
-                            const Icon = getSourceIcon(source.source_type);
-                            return (
-                              <div
-                                key={i}
-                                className="p-2 rounded-md bg-[#0a0a0a] border border-[#1a1a1a] text-xs flex items-start gap-2"
-                              >
-                                <Icon
-                                  className="w-3.5 h-3.5 text-[#10b981] shrink-0 mt-0.5"
-                                  strokeWidth={1.5}
-                                />
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center justify-between gap-2">
-                                    <span className="text-zinc-300 font-mono text-[11px] font-medium truncate">
+                  {/* Sources */}
+                  {msg.role === "assistant" && msg.sources && msg.sources.length > 0 && (() => {
+                    const uniqueTypes = summarizeSourceTypes(msg.sources.map((s) => s.source_type));
+                    const isMultiSource = uniqueTypes.length >= 2;
+
+                    return (
+                      <div className="mt-2.5 pt-2.5 border-t border-white/5">
+                        {/* "Synthesized from X + Y" badge — only shows when 2+ distinct source types */}
+                        {isMultiSource && (
+                          <div className="flex items-center gap-1.5 mb-2 px-2 py-1 rounded-md bg-[rgba(16,185,129,0.08)] border border-[rgba(16,185,129,0.15)] w-fit">
+                            <Sparkles className="w-3 h-3 text-[#10b981]" strokeWidth={2} />
+                            <span className="text-[11px] text-[#10b981] font-medium">
+                              Synthesized from {uniqueTypes.join(" + ")}
+                            </span>
+                          </div>
+                        )}
+
+                        <button
+                          onClick={() => toggleSources(msg.message_id)}
+                          className="flex items-center gap-1.5 text-[11px] text-[#525252] hover:text-[#10b981] transition-colors cursor-pointer"
+                        >
+                          <ChevronDown
+                            className={`w-3 h-3 transition-transform ${
+                              expandedSources.has(msg.message_id) ? "rotate-180" : ""
+                            }`}
+                            strokeWidth={1.5}
+                          />
+                          <span>
+                            {msg.sources.length} source{msg.sources.length !== 1 ? "s" : ""} cited
+                            {isMultiSource ? ` across ${uniqueTypes.length} sources` : ""}
+                          </span>
+                        </button>
+
+                        {expandedSources.has(msg.message_id) && (
+                          <div className="mt-2 space-y-1.5">
+                            {msg.sources.map((source, i) => {
+                              const config = getSourceConfig(source.source_type);
+                              const Icon = config.icon;
+                              return (
+                                <div
+                                  key={i}
+                                  className="p-2 rounded-md bg-[#0a0a0a] border border-[#1a1a1a] text-xs flex items-start gap-2"
+                                >
+                                  <div
+                                    className="w-5 h-5 rounded flex items-center justify-center shrink-0"
+                                    style={{ background: `${config.color}15` }}
+                                  >
+                                    <Icon className="w-3 h-3" style={{ color: config.color }} strokeWidth={1.5} />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span
+                                        className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+                                        style={{ background: `${config.color}15`, color: config.color }}
+                                      >
+                                        {config.label}
+                                      </span>
+                                      <span className="text-[10px] text-zinc-500 font-mono shrink-0">
+                                        {Math.round(source.relevance_score * 100)}% match
+                                      </span>
+                                    </div>
+                                    <span className="text-zinc-300 font-mono text-[11px] font-medium truncate block mt-1">
                                       {source.source_id}
                                     </span>
-                                    <span className="text-[10px] text-zinc-500 font-mono">
-                                      {Math.round(source.relevance_score * 100)}% match
-                                    </span>
+                                    {source.content_preview && (
+                                      <p className="text-zinc-500 text-[11px] mt-0.5 line-clamp-2 leading-snug">
+                                        {source.content_preview}
+                                      </p>
+                                    )}
+                                    {source.source_url && (
+                                      <a
+                                        href={source.source_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-[10px] text-[#10b981] hover:underline mt-1 inline-block"
+                                      >
+                                        View source →
+                                      </a>
+                                    )}
                                   </div>
-                                  {source.content_preview && (
-                                    <p className="text-zinc-500 text-[11px] mt-0.5 line-clamp-2 leading-snug">
-                                      {source.content_preview}
-                                    </p>
-                                  )}
                                 </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {msg.role === "user" && (

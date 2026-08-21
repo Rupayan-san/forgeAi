@@ -22,6 +22,7 @@ import {
   Users,
   RefreshCw,
   Trash2,
+  Network,
 } from "lucide-react";
 import { GithubIcon } from "@/components/shared/github-icon";
 import { useProjectStore } from "@/store/use-project-store";
@@ -140,6 +141,12 @@ export default function ProjectPage() {
       icon: FileText,
       title: "Decision Log",
       description: "AI-extracted architectural decisions from your team",
+    },
+    {
+      href: `/project/${projectId}/graph`,
+      icon: Network,
+      title: "Knowledge Graph",
+      description: "Visualize how decisions connect to source files, messages, and people",
     },
   ];
 
