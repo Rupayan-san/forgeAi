@@ -35,7 +35,7 @@ export function ArchitectureSection() {
     {
       num: "05",
       title: "Hybrid Retrieval & Citations",
-      tech: "RAG + Agora Voice AI",
+      tech: "RAG + Vector Retrieval",
       desc: "Sub-300ms vector search delivers answers with verified PR and message citation proofs.",
     },
   ];

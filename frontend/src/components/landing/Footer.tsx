@@ -25,7 +25,7 @@ export function Footer() {
               <span className="text-sm font-bold tracking-wider uppercase font-sans">FORGE AI</span>
             </div>
             <p className="text-xs text-zinc-400 max-w-sm leading-relaxed">
-              Voice-native AI project memory for engineering teams. Ingests GitHub commits, pull requests, and Discord threads into a living vector knowledge graph.
+              Intelligent AI project memory for engineering teams. Ingests GitHub commits, pull requests, and Discord threads into a living vector knowledge graph.
             </p>
             <div className="flex items-center gap-4 text-xs text-zinc-500 pt-2 font-mono">
               <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">GitHub</a>
@@ -51,7 +51,7 @@ export function Footer() {
             <ul className="space-y-3 text-xs text-zinc-400">
               <li><a href="http://localhost:8000/docs" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors inline-flex items-center gap-1">FastAPI Docs <ArrowUpRight className="w-3 h-3" /></a></li>
               <li><a href="https://qdrant.tech" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors inline-flex items-center gap-1">Qdrant Vector DB <ArrowUpRight className="w-3 h-3" /></a></li>
-              <li><a href="https://agora.io" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors inline-flex items-center gap-1">Agora Voice AI <ArrowUpRight className="w-3 h-3" /></a></li>
+              <li><a href="https://openai.com" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors inline-flex items-center gap-1">OpenAI API <ArrowUpRight className="w-3 h-3" /></a></li>
               <li><a href="#" className="hover:text-white transition-colors">API Reference</a></li>
             </ul>
           </div>

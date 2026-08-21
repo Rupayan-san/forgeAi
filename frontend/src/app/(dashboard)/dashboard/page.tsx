@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -19,12 +19,38 @@ import {
   ChevronRight,
   ExternalLink,
   UserPlus,
+  Users,
+  GitCommit,
 } from "lucide-react";
 import { GithubIcon } from "@/components/shared/github-icon";
+import { DiscordIcon } from "@/components/shared/discord-icon";
 import { useProjectStore } from "@/store/use-project-store";
 import { useAuthStore } from "@/store/use-auth-store";
-import type { Project } from "@/types";
+import type { Project, ActivityItem } from "@/types";
 import { api } from "@/lib/api";
+
+function formatRelativeTime(isoString: string): string {
+  if (!isoString) return "Just now";
+  try {
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return "Recently";
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHours = Math.floor(diffMin / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffSec < 45) return "Just now";
+    if (diffMin < 60) return `${diffMin}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays === 1) return "Yesterday";
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  } catch {
+    return "Recently";
+  }
+}
 
 function JoinProjectDialog({
   isOpen,
@@ -121,13 +147,7 @@ function JoinProjectDialog({
   );
 }
 
-// Mock recent activity for demo
-const recentActivity = [
-  { type: "github", action: "Ingested 42 commits from main", time: "2 min ago", status: "success" },
-  { type: "discord", action: "Captured 156 messages from #engineering", time: "12 min ago", status: "success" },
-  { type: "decision", action: "Extracted 3 decisions from PR #89", time: "1 hour ago", status: "success" },
-  { type: "github", action: "Indexed README.md and 8 issue threads", time: "3 hours ago", status: "success" },
-];
+
 
 function CreateProjectDialog({
   isOpen,
@@ -139,6 +159,7 @@ function CreateProjectDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [githubUrl, setGithubUrl] = useState("");
+  const [discordGuildId, setDiscordGuildId] = useState("");
   const [maxMembers, setMaxMembers] = useState(10);
   const [isCreating, setIsCreating] = useState(false);
   const { createProject } = useProjectStore();
@@ -151,11 +172,13 @@ function CreateProjectDialog({
         name: name.trim(),
         description: description.trim(),
         github_repo_url: githubUrl.trim(),
+        discord_guild_id: discordGuildId.trim(),
         max_members: Number(maxMembers),
       });
       setName("");
       setDescription("");
       setGithubUrl("");
+      setDiscordGuildId("");
       setMaxMembers(10);
       onClose();
     } catch (err) {
@@ -178,13 +201,13 @@ function CreateProjectDialog({
       <div className="surface relative z-10 w-full max-w-md mx-4 p-6 animate-scale-in">
         <h2 className="text-base font-semibold text-[#fafafa] mb-0.5">New Project</h2>
         <p className="text-[#525252] text-[13px] mb-5">
-          Connect a GitHub repository to start building your project memory.
+          Connect your GitHub repository and Discord server to build project memory.
         </p>
 
         <div className="space-y-3">
           <div>
             <label className="block text-[12px] text-[#525252] mb-1 font-medium">
-              Project Name
+              Project Name *
             </label>
             <input
               type="text"
@@ -192,6 +215,7 @@ function CreateProjectDialog({
               onChange={(e) => setName(e.target.value)}
               placeholder="My Awesome Project"
               className="forge-input w-full px-3 py-2 text-[13px]"
+              required
             />
           </div>
           <div>
@@ -219,7 +243,20 @@ function CreateProjectDialog({
             />
           </div>
           <div>
-            <label className="block text-sm text-[rgba(255,255,255,0.5)] mb-1.5">
+            <label className="block text-[12px] text-[#525252] mb-1 font-medium flex items-center justify-between">
+              <span>Discord Server ID (Guild ID)</span>
+              <span className="text-[10px] text-[#737373] font-normal">Optional</span>
+            </label>
+            <input
+              type="text"
+              value={discordGuildId}
+              onChange={(e) => setDiscordGuildId(e.target.value)}
+              placeholder="e.g. 123456789012345678"
+              className="forge-input w-full px-3 py-2 text-[13px]"
+            />
+          </div>
+          <div>
+            <label className="block text-[12px] text-[#525252] mb-1 font-medium">
               Maximum Members Allowed
             </label>
             <input
@@ -229,7 +266,7 @@ function CreateProjectDialog({
               value={maxMembers}
               onChange={(e) => setMaxMembers(Math.max(1, Number(e.target.value)))}
               placeholder="10"
-              className="glass-input w-full px-4 py-2.5 text-sm"
+              className="forge-input w-full px-3 py-2 text-[13px]"
             />
           </div>
         </div>
@@ -347,8 +384,38 @@ function ProjectRow({ project }: { project: Project }) {
 export default function DashboardPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [joinDialogOpen, setJoinDialogOpen] = useState(false);
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [pendingProjects, setPendingProjects] = useState<Project[]>([]);
+  const [isLoadingActivity, setIsLoadingActivity] = useState(true);
   const { user } = useAuthStore();
-  const { projects, isLoading } = useProjectStore();
+  const { projects, isLoading, fetchProjects } = useProjectStore();
+
+  const fetchPendingRequests = async () => {
+    try {
+      const pending = await api.get<Project[]>("/projects/join/pending");
+      setPendingProjects(pending || []);
+    } catch {
+      setPendingProjects([]);
+    }
+  };
+
+  useEffect(() => {
+    if (user) {
+      fetchProjects();
+      fetchPendingRequests();
+    }
+  }, [user, fetchProjects]);
+
+  useEffect(() => {
+    setIsLoadingActivity(true);
+    api.get<ActivityItem[]>("/projects/activity/all")
+      .then((data) => setActivities(data || []))
+      .catch((err) => {
+        console.error("Failed to fetch recent activity:", err);
+        setActivities([]);
+      })
+      .finally(() => setIsLoadingActivity(false));
+  }, [projects]);
 
   const totalChunks = projects.reduce(
     (sum, p) =>
@@ -392,6 +459,39 @@ export default function DashboardPage() {
           </button>
         </div>
       </div>
+
+      {/* Pending Join Requests Banner */}
+      {pendingProjects.length > 0 && (
+        <div className="mb-6 surface p-4 border border-amber-500/30 bg-amber-500/5">
+          <div className="flex items-center gap-2 mb-1.5">
+            <Clock className="w-4 h-4 text-amber-400" strokeWidth={1.5} />
+            <h3 className="text-[13px] font-semibold text-amber-300">
+              Pending Join Requests ({pendingProjects.length})
+            </h3>
+          </div>
+          <p className="text-[12px] text-[#888] mb-3">
+            You requested to join the following project{pendingProjects.length > 1 ? "s" : ""}. They will appear in your active workspace once approved by the project owner.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {pendingProjects.map((proj) => (
+              <div
+                key={proj.project_id}
+                className="bg-[#111] border border-[#222] rounded-md p-3 flex items-center justify-between"
+              >
+                <div>
+                  <p className="text-[13px] font-medium text-[#fafafa]">{proj.name}</p>
+                  <p className="text-[11px] text-[#666] font-mono mt-0.5">
+                    {proj.github_repo_name || "Repository not linked"}
+                  </p>
+                </div>
+                <span className="text-[11px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded font-medium">
+                  Awaiting Approval
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
@@ -470,40 +570,71 @@ export default function DashboardPage() {
         {/* Recent Activity */}
         <div className="lg:col-span-1">
           <div className="surface overflow-hidden">
-            <div className="px-4 py-3 border-b border-[#1a1a1a]">
+            <div className="px-4 py-3 border-b border-[#1a1a1a] flex items-center justify-between">
               <h2 className="text-[13px] font-medium text-[#a3a3a3]">Recent Activity</h2>
+              <span className="text-[10px] text-[#525252] font-mono">Live</span>
             </div>
-            <div className="divide-y divide-[#0f0f0f]">
-              {recentActivity.map((item, i) => (
-                <div key={i} className="px-4 py-3 hover:bg-[#0f0f0f] transition-colors">
-                  <div className="flex items-start gap-2.5">
-                    <div className="mt-0.5">
-                      <div className="status-dot status-dot-success" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[12px] text-[#a3a3a3] leading-snug">{item.action}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="forge-badge forge-badge-neutral">
-                          {item.type}
-                        </span>
-                        <span className="text-[10px] text-[#404040]">{item.time}</span>
+            {isLoadingActivity ? (
+              <div className="p-6 flex items-center justify-center">
+                <Loader2 className="w-4 h-4 text-[#10b981] animate-spin" />
+              </div>
+            ) : activities.length === 0 ? (
+              <div className="p-6 text-center">
+                <p className="text-[12px] text-[#525252]">No recent activity recorded yet.</p>
+                <p className="text-[11px] text-[#404040] mt-1">Create or join a project to get started.</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-[#0f0f0f] max-h-[420px] overflow-y-auto">
+                {activities.map((item) => (
+                  <div key={item.id} className="px-4 py-3 hover:bg-[#0f0f0f] transition-colors">
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-6 h-6 rounded bg-[#111111] border border-[#1a1a1a] flex items-center justify-center mt-0.5 shrink-0">
+                        {item.type === "decision" ? (
+                          <FileText className="w-3 h-3 text-purple-400" strokeWidth={1.5} />
+                        ) : item.type === "discord" ? (
+                          <DiscordIcon size={12} className="text-[#5865F2]" />
+                        ) : item.type === "chat" ? (
+                          <MessageSquare className="w-3 h-3 text-blue-400" strokeWidth={1.5} />
+                        ) : item.type === "member" ? (
+                          <Users className="w-3 h-3 text-amber-400" strokeWidth={1.5} />
+                        ) : (
+                          <GithubIcon size={12} className="text-[#10b981]" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[12px] text-[#a3a3a3] leading-snug line-clamp-2" title={item.title}>
+                          {item.title}
+                        </p>
+                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                          <span className="text-[10px] text-[#525252] font-medium">{item.source}</span>
+                          <span className="text-[10px] text-[#333]">·</span>
+                          <span className="text-[10px] text-[#404040]">{formatRelativeTime(item.timestamp)}</span>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       <CreateProjectDialog
         isOpen={dialogOpen}
-        onClose={() => setDialogOpen(false)}
+        onClose={() => {
+          setDialogOpen(false);
+          fetchProjects();
+          fetchPendingRequests();
+        }}
       />
       <JoinProjectDialog
         isOpen={joinDialogOpen}
-        onClose={() => setJoinDialogOpen(false)}
+        onClose={() => {
+          setJoinDialogOpen(false);
+          fetchProjects();
+          fetchPendingRequests();
+        }}
       />
     </div>
   );

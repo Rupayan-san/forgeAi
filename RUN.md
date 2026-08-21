@@ -5,6 +5,19 @@
 
 ---
 
+## ⚡ Quick Start (All-in-One Command)
+
+From the project root, start all services (Backend, RQ Worker, Discord Bot, and Frontend) with a single command:
+
+```bash
+python start_all.py
+```
+*Or on Windows, simply double-click or run `start.bat` / `.\start.ps1`.*
+
+Press `Ctrl + C` in the terminal to stop all services simultaneously.
+
+---
+
 ## Prerequisites
 
 | Tool       | Version  | Install                                                      |

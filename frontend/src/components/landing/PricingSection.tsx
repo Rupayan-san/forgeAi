@@ -149,7 +149,7 @@ export function PricingSection() {
                 </li>
                 <li className="flex items-center gap-2">
                   <Check className="w-3.5 h-3.5 text-zinc-400" />
-                  <span>Agora Voice Assistant AI</span>
+                  <span>Automated Decision Extraction</span>
                 </li>
               </ul>
             </div>

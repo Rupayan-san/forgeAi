@@ -34,7 +34,7 @@ export function PricingMatrix() {
         "5 Connected GitHub Repos",
         "1 Discord Server Sync",
         "50,000 Vector Chunks",
-        "Voice Assistant (Agora)",
+        "Sub-Second Vector Search",
         "Decision Log Auto-Extraction",
       ],
       cta: "Start Basic Trial",

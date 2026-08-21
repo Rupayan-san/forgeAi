@@ -20,14 +20,14 @@ function CallbackContent() {
       try {
         const user = JSON.parse(decodeURIComponent(userStr));
         setAuth(user, token);
-        router.push("/dashboard");
+        window.location.href = "/dashboard";
       } catch {
         setError("Failed to parse authentication data");
       }
     } else {
       setError("Missing authentication data");
     }
-  }, [searchParams, setAuth, router]);
+  }, [searchParams, setAuth]);
 
   if (error) {
     return (

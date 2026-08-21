@@ -25,29 +25,54 @@ export const useAuthStore = create<AuthState>()(
 
       logout: () => {
         api.setToken(null);
-        set({ user: null, token: null, isAuthenticated: false });
+        set({ user: null, token: null, isAuthenticated: false, isLoading: false });
       },
 
       checkAuth: async () => {
-        const { token } = get();
+        let token = get().token;
+        if (!token && typeof window !== "undefined") {
+          try {
+            const raw = localStorage.getItem("forge-auth");
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              token = parsed?.state?.token;
+            }
+          } catch {}
+        }
+
         if (!token) {
-          set({ isAuthenticated: false, isLoading: false });
+          set({ user: null, token: null, isAuthenticated: false, isLoading: false });
           return;
         }
 
-        set({ isLoading: true });
+        api.setToken(token);
+        set({ token, isAuthenticated: true, isLoading: true });
+
         try {
-          api.setToken(token);
           const user = await api.get<User>("/auth/me");
-          set({ user, isAuthenticated: true, isLoading: false });
-        } catch {
-          set({ user: null, token: null, isAuthenticated: false, isLoading: false });
+          set({ user, token, isAuthenticated: true, isLoading: false });
+        } catch (err: any) {
+          console.warn("Session check returned error:", err);
+          // If explicitly unauthorized (401), clear session
+          if (err?.message?.includes("401") || err?.message?.includes("Unauthorized") || err?.message?.includes("expired")) {
+            api.setToken(null);
+            set({ user: null, token: null, isAuthenticated: false, isLoading: false });
+          } else {
+            // Otherwise preserve existing state so network blips do not boot the user out
+            set({ isLoading: false });
+          }
         }
       },
     }),
     {
       name: "forge-auth",
       partialize: (state) => ({ token: state.token, user: state.user }),
+      onRehydrateStorage: () => (state) => {
+        if (state?.token) {
+          api.setToken(state.token);
+          state.isAuthenticated = true;
+        }
+      },
     }
   )
 );

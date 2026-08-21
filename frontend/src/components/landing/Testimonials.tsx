@@ -14,7 +14,7 @@ const testimonials = [
     avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80",
   },
   {
-    quote: "The Qdrant vector memory integration with Agora voice allows our tech leads to query the codebase during commuting or code reviews hands-free. Truly revolutionary.",
+    quote: "The Qdrant vector memory integration allows our tech leads to query the entire codebase during PR reviews with instant verified provenance. Truly revolutionary.",
     metric: "10x FASTER",
     metricDesc: "Context Retrieval",
     author: "Alex Kumar",

@@ -20,8 +20,10 @@ import {
   Hash,
   Eye,
   EyeOff,
+  ExternalLink,
 } from "lucide-react";
 import { GithubIcon } from "@/components/shared/github-icon";
+import { DiscordIcon } from "@/components/shared/discord-icon";
 import { useProjectStore } from "@/store/use-project-store";
 import { useAuthStore } from "@/store/use-auth-store";
 import { api } from "@/lib/api";
@@ -37,6 +39,9 @@ type JoinRequest = {
 
 export default function SettingsPage() {
   const currentProject = useProjectStore((state) => state.currentProject);
+  const projects = useProjectStore((state) => state.projects);
+  const fetchProjects = useProjectStore((state) => state.fetchProjects);
+  const setCurrentProject = useProjectStore((state) => state.setCurrentProject);
   const fetchProject = useProjectStore((state) => state.fetchProject);
   const isLoading = useProjectStore((state) => state.isLoading);
   const user = useAuthStore((state) => state.user);
@@ -63,6 +68,17 @@ export default function SettingsPage() {
   const [showApiKey, setShowApiKey] = useState(false);
   const [apiKeyCopied, setApiKeyCopied] = useState(false);
   const mockApiKey = "forge_sk_a3f2d1e4b5c6d7e8f921";
+
+  // Auto-fetch and select first project if none selected
+  useEffect(() => {
+    fetchProjects();
+  }, [fetchProjects]);
+
+  useEffect(() => {
+    if (!currentProject && projects.length > 0) {
+      setCurrentProject(projects[0]);
+    }
+  }, [currentProject, projects, setCurrentProject]);
 
   // Initialize form when project loads
   useEffect(() => {
@@ -159,11 +175,32 @@ export default function SettingsPage() {
   return (
     <div className="p-6 lg:p-8 max-w-[860px]">
       {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-lg font-semibold text-[#fafafa] tracking-tight">Settings</h1>
-        <p className="text-[#525252] text-[13px] mt-0.5">
-          Manage project configuration, team members, and user credentials
-        </p>
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-lg font-semibold text-[#fafafa] tracking-tight">Settings</h1>
+          <p className="text-[#525252] text-[13px] mt-0.5">
+            Manage project configuration, team members, and user credentials
+          </p>
+        </div>
+        {projects.length > 1 && (
+          <div className="flex items-center gap-2">
+            <span className="text-[12px] text-[#737373]">Project:</span>
+            <select
+              value={currentProject?.project_id || ""}
+              onChange={(e) => {
+                const found = projects.find((p) => p.project_id === e.target.value);
+                if (found) setCurrentProject(found);
+              }}
+              className="forge-input px-3 py-1.5 text-[12px] bg-[#141414] border border-[#262626] rounded-md text-[#fafafa]"
+            >
+              {projects.map((proj) => (
+                <option key={proj.project_id} value={proj.project_id}>
+                  {proj.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}
@@ -264,17 +301,31 @@ export default function SettingsPage() {
               </p>
             </div>
 
-            <div className="space-y-1.5 pt-3 border-t border-white/5">
-              <label className="block text-[12px] text-[#525252] font-medium">Discord Server ID (Guild ID)</label>
+            <div className="space-y-2 pt-3 border-t border-white/5">
+              <div className="flex items-center justify-between">
+                <label className="block text-[12px] text-[#525252] font-medium flex items-center gap-1.5">
+                  <DiscordIcon size={14} className="text-[#5865F2]" />
+                  Discord Server ID (Guild ID)
+                </label>
+                <a
+                  href="https://discord.com/oauth2/authorize?permissions=68608&scope=bot%20applications.commands"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] text-[#5865F2] hover:text-[#7983f5] transition-colors"
+                >
+                  Invite Bot to Server
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
               <input
                 type="text"
                 value={discordGuildId}
                 onChange={(e) => setDiscordGuildId(e.target.value)}
                 placeholder="e.g. 123456789012345678"
-                className="forge-input w-full px-3 py-2 text-[13px]"
+                className="forge-input w-full px-3 py-2 text-[13px] font-mono"
               />
               <p className="text-[11px] text-[#525252]">
-                Enable Developer Mode in Discord, right-click your server name, and select &quot;Copy Server ID&quot;.
+                Enable Developer Mode in Discord (User Settings &gt; Advanced &gt; Developer Mode), right-click your server name, and select &quot;Copy Server ID&quot;.
               </p>
             </div>
           </div>

@@ -12,25 +12,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const isLoading = useAuthStore((state) => state.isLoading);
   const checkAuth = useAuthStore((state) => state.checkAuth);
   const token = useAuthStore((state) => state.token);
+  const user = useAuthStore((state) => state.user);
   
   const fetchProjects = useProjectStore((state) => state.fetchProjects);
   const router = useRouter();
-  const [ready, setReady] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
-    const init = async () => {
-      await checkAuth();
-      setReady(true);
-    };
-    init();
-  }, []);
+    setMounted(true);
+    checkAuth();
+  }, [checkAuth]);
 
   useEffect(() => {
-    if (ready && !isLoading && !isAuthenticated) {
-      router.push("/login");
+    if (mounted && !isLoading && !isAuthenticated && !token) {
+      router.replace("/login");
     }
-  }, [ready, isLoading, isAuthenticated, router]);
+  }, [mounted, isLoading, isAuthenticated, token, router]);
 
   useEffect(() => {
     if (isAuthenticated && token) {
@@ -38,18 +36,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, [isAuthenticated, token, fetchProjects]);
 
-  if (!ready || isLoading) {
+  if (!mounted || (isLoading && !user && !token)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#050505]">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="w-5 h-5 text-[#10b981] animate-spin" strokeWidth={2} />
-          <p className="text-[#525252] text-[13px]">Loading...</p>
+          <p className="text-[#525252] text-[13px]">Loading workspace...</p>
         </div>
       </div>
     );
   }
 
-  if (!isAuthenticated) {
+  if (!isAuthenticated && !token) {
     return null;
   }
 

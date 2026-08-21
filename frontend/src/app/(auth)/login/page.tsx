@@ -1,12 +1,27 @@
 "use client";
 
-import { Zap } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Zap, Loader2 } from "lucide-react";
 import { GithubIcon } from "@/components/shared/github-icon";
 import { useAuthStore } from "@/store/use-auth-store";
 import Link from "next/link";
 
 export default function LoginPage() {
-  const { login } = useAuthStore();
+  const { login, isAuthenticated, token } = useAuthStore();
+  const router = useRouter();
+  const [isRedirecting, setIsRedirecting] = useState(false);
+
+  useEffect(() => {
+    if (isAuthenticated && token) {
+      router.replace("/dashboard");
+    }
+  }, [isAuthenticated, token, router]);
+
+  const handleLogin = () => {
+    setIsRedirecting(true);
+    login();
+  };
 
   return (
     <div className="w-full max-w-sm">
@@ -31,11 +46,16 @@ export default function LoginPage() {
         </p>
 
         <button
-          onClick={login}
-          className="w-full flex items-center justify-center gap-2.5 px-5 py-2.5 bg-[#fafafa] text-[#050505] text-sm font-medium rounded-md hover:bg-[#e5e5e5] transition-colors cursor-pointer"
+          onClick={handleLogin}
+          disabled={isRedirecting}
+          className="w-full flex items-center justify-center gap-2.5 px-5 py-2.5 bg-[#fafafa] text-[#050505] text-sm font-medium rounded-md hover:bg-[#e5e5e5] transition-colors disabled:opacity-70 cursor-pointer"
         >
-          <GithubIcon className="w-4 h-4" size={16} />
-          Continue with GitHub
+          {isRedirecting ? (
+            <Loader2 className="w-4 h-4 animate-spin text-[#050505]" />
+          ) : (
+            <GithubIcon className="w-4 h-4" size={16} />
+          )}
+          {isRedirecting ? "Connecting to GitHub..." : "Continue with GitHub"}
         </button>
 
         <p className="text-[#404040] text-[11px] text-center mt-5">

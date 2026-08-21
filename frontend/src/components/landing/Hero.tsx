@@ -29,7 +29,7 @@ export function Hero() {
           transition={{ duration: 0.6, delay: 0.2 }}
           className="text-base sm:text-lg md:text-xl text-zinc-400 max-w-2xl mx-auto mb-10 leading-relaxed font-normal"
         >
-          Forge connects your GitHub and Discord activity into living project memory, giving you source-backed answers about your code and decisions.
+          Living project memory with source-backed answers for your code and decisions.
         </motion.p>
 
         {/* Dual CTAs */}
