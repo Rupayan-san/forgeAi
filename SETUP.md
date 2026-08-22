@@ -1,5 +1,21 @@
 # Forge AI - Environment Setup Guide
 
+## Recommended local infrastructure
+
+Install Docker Desktop and verify Compose before starting Forge:
+
+```powershell
+docker --version
+docker compose version
+docker compose config
+docker compose up -d
+```
+
+The repository Compose file runs MongoDB, Redis, Qdrant, FastAPI, the Forge
+worker, Prometheus, Grafana, and the OpenTelemetry Collector. The Next.js
+frontend remains native. Discord is an optional Compose profile. See
+[RUN.md](./RUN.md) for the full startup and verification flow.
+
 To run Forge locally, you'll need several API keys and credentials. This guide walks you through exactly how to get each one.
 
 ## 1. MongoDB Atlas (Primary Database)

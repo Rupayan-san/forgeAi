@@ -23,6 +23,7 @@ import threading
 import signal
 import time
 import argparse
+import json
 import shutil
 import socket
 from urllib.request import urlopen
@@ -133,36 +134,118 @@ def check_discord_token():
     return False
 
 
-def start_services(with_observability: bool = False):
+DOCKER_SERVICES = {
+    "mongodb", "redis", "qdrant", "prometheus", "grafana", "otel-collector",
+    "backend", "worker",
+}
+
+
+def docker_infrastructure_ready() -> bool:
+    """Return true only when all Compose services are running and healthy where supported."""
+    result = subprocess.run(
+        ["docker", "compose", "ps", "--all", "--format", "json"],
+        cwd=str(ROOT_DIR),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if result.returncode != 0:
+        return False
+
+    output = result.stdout.strip()
+    try:
+        parsed = json.loads(output)
+        rows = parsed if isinstance(parsed, list) else [parsed]
+    except json.JSONDecodeError:
+        rows = []
+        for line in output.splitlines():
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+
+    services = {}
+    for row in rows:
+        service_name = str(row.get("Service", "")).lower()
+        if not service_name:
+            container_name = str(row.get("Name", "")).lower()
+            service_name = next((service for service in DOCKER_SERVICES if f"-{service}-" in container_name or container_name.endswith(f"-{service}-1")), "")
+        if service_name:
+            services[service_name] = row
+    if not DOCKER_SERVICES.issubset(services):
+        return False
+    for service, row in services.items():
+        state = str(row.get("State", "")).lower()
+        health = str(row.get("Health", "")).lower()
+        if state not in {"running", "up"}:
+            return False
+        if health and health not in {"healthy", "up"}:
+            return False
+    return True
+
+
+def start_docker_infrastructure() -> bool:
+    """Start the Dockerized Forge stack; Compose owns backend-side services."""
+    if not executable_available("docker"):
+        print(f"{RED}[ERROR] Docker was not found on PATH. Install Docker Desktop first.{RESET}")
+        return False
+
+    print(f"{CYAN}> Starting Docker Forge stack with docker compose up -d ...{RESET}")
+    result = subprocess.run(
+        ["docker", "compose", "up", "-d"],
+        cwd=str(ROOT_DIR),
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if result.returncode != 0:
+        print(f"{RED}[ERROR] Docker Compose failed to start infrastructure.{RESET}")
+        return False
+
+    deadline = time.time() + 90
+    while time.time() < deadline:
+        if docker_infrastructure_ready():
+            print(f"{GREEN}[OK] Docker Forge stack is running and healthy.{RESET}")
+            return True
+        time.sleep(2)
+
+    print(f"{RED}[ERROR] Docker Forge stack did not become healthy within 90 seconds.{RESET}")
+    subprocess.run(["docker", "compose", "ps"], cwd=str(ROOT_DIR))
+    return False
+
+
+def start_services(with_observability: bool = False, dockerized_backend: bool = False):
     global shutting_down
 
     print(f"\n{GREEN}{BOLD}{'='*60}{RESET}")
     print(f"{GREEN}{BOLD}       Starting Forge AI Full Stack System{RESET}")
     print(f"{GREEN}{BOLD}{'='*60}{RESET}\n")
 
-    # 1. Start Backend FastAPI
-    print(f"{CYAN}> Launching Backend API on http://localhost:8000 ...{RESET}")
-    backend_cmd = [
-        PYTHON_EXEC, "-m", "uvicorn", "app.main:app",
-        "--reload", "--host", "0.0.0.0", "--port", "8000"
-    ]
-    if launch_process("Backend", backend_cmd, BACKEND_DIR, CYAN, port=8000, health_url="http://127.0.0.1:8000/") is None:
-        shutdown()
-
-    # 2. Start RQ Worker
-    print(f"{MAGENTA}> Launching RQ Background Ingestion Worker ...{RESET}")
-    worker_cmd = [PYTHON_EXEC, "worker.py"]
-    launch_process("RQ Worker", worker_cmd, BACKEND_DIR, MAGENTA)
-
-    # 3. Start Discord Bot (if configured)
-    if check_discord_token():
-        print(f"{YELLOW}> Launching Discord Bot Listener ...{RESET}")
-        discord_cmd = [PYTHON_EXEC, "discord_bot.py"]
-        launch_process("Discord Bot", discord_cmd, BACKEND_DIR, YELLOW)
+    if dockerized_backend:
+        print(f"{CYAN}> Backend, RQ worker, and infrastructure are managed by Docker Compose.{RESET}")
     else:
-        print(f"{YELLOW}i DISCORD_BOT_TOKEN not configured in .env (skipping Discord Bot){RESET}")
+        # Native fallback for development environments without Docker Desktop.
+        print(f"{CYAN}> Launching Backend API on http://localhost:8000 ...{RESET}")
+        backend_cmd = [
+            PYTHON_EXEC, "-m", "uvicorn", "app.main:app",
+            "--reload", "--host", "0.0.0.0", "--port", "8000"
+        ]
+        if launch_process("Backend", backend_cmd, BACKEND_DIR, CYAN, port=8000, health_url="http://127.0.0.1:8000/") is None:
+            shutdown()
 
-    # 4. Start Frontend
+        print(f"{MAGENTA}> Launching RQ Background Ingestion Worker ...{RESET}")
+        worker_cmd = [PYTHON_EXEC, "worker.py"]
+        launch_process("RQ Worker", worker_cmd, BACKEND_DIR, MAGENTA)
+
+        if check_discord_token():
+            print(f"{YELLOW}> Launching Discord Bot Listener ...{RESET}")
+            discord_cmd = [PYTHON_EXEC, "discord_bot.py"]
+            launch_process("Discord Bot", discord_cmd, BACKEND_DIR, YELLOW)
+        else:
+            print(f"{YELLOW}i DISCORD_BOT_TOKEN not configured in .env (skipping Discord Bot){RESET}")
+
+    # The Next.js frontend remains native in both modes.
     print(f"{GREEN}> Launching Frontend Dev Server on http://localhost:3000 ...{RESET}")
     frontend_cmd = [NPM_CMD, "run", "dev"]
     launch_process("Frontend", frontend_cmd, FRONTEND_DIR, GREEN, port=3000, health_url="http://127.0.0.1:3000/")
@@ -231,10 +314,19 @@ def shutdown(signum=None, frame=None):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Start Forge application and optional local observability processes")
+    parser = argparse.ArgumentParser(description="Start Forge native services or the Docker Compose stack plus native frontend")
     parser.add_argument("--with-observability", action="store_true", help="Start installed Prometheus, Grafana, and OpenTelemetry Collector processes")
+    parser.add_argument("--docker", dest="docker_stack", action="store_true", help="Start the Docker Compose backend stack and native Next.js frontend")
+    parser.add_argument("--docker-infra", dest="docker_stack", action="store_true", help="Compatibility alias for --docker")
     args = parser.parse_args()
     signal.signal(signal.SIGINT, shutdown)
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, shutdown)
-    start_services(with_observability=args.with_observability)
+    if args.docker_stack and not start_docker_infrastructure():
+        raise SystemExit(1)
+    if args.docker_stack and args.with_observability:
+        print(f"{YELLOW}[WARN] --docker already starts observability containers; skipping native observability processes.{RESET}")
+    start_services(
+        with_observability=args.with_observability and not args.docker_stack,
+        dockerized_backend=args.docker_stack,
+    )
