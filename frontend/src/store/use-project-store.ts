@@ -25,7 +25,7 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
   fetchProjects: async () => {
     set({ isLoading: true, error: null });
     try {
-      const projects = await api.get<Project[]>("/projects/");
+      const projects = await api.get<Project[]>("/projects");
       set({ projects, isLoading: false });
     } catch (err) {
       set({ error: (err as Error).message, isLoading: false });
@@ -47,7 +47,7 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
   setCurrentProject: (project) => set({ currentProject: project }),
 
   createProject: async (data) => {
-    const project = await api.post<Project>("/projects/", data);
+    const project = await api.post<Project>("/projects", data);
     set((state) => ({ projects: [...state.projects, project] }));
     return project;
   },

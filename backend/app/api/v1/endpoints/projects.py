@@ -78,6 +78,7 @@ async def build_project_response(db: AsyncIOMotorDatabase, doc: dict) -> Project
 import random
 import string
 
+@router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 async def create_project(
     project_data: ProjectCreate,
@@ -380,6 +381,7 @@ async def trigger_github_ingestion(
     return {"message": "Ingestion started", "job_id": job_info["job_id"]}
 
 
+@router.get("", response_model=list[ProjectResponse])
 @router.get("/", response_model=list[ProjectResponse])
 async def list_projects(
     current_user: UserModel = Depends(get_current_user),

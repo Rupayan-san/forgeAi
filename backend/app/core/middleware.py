@@ -5,7 +5,7 @@ from app.core.config import settings
 
 def setup_middleware(app: FastAPI) -> None:
     """Configure application middleware."""
-    # CORS
+    # CORS — credentials must be True for HttpOnly cookie refresh tokens
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -18,4 +18,5 @@ def setup_middleware(app: FastAPI) -> None:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["Set-Cookie"],
     )

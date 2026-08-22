@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Zap,
   LayoutDashboard,
@@ -23,6 +23,12 @@ const mainNav = [
 export function Sidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    await logout();
+    router.replace("/login");
+  };
   const { projects } = useProjectStore();
   const [projectsExpanded, setProjectsExpanded] = useState(true);
 
@@ -157,7 +163,7 @@ export function Sidebar() {
             <p className="text-[10px] text-[#525252] truncate">@{user?.github_username}</p>
           </div>
           <button
-            onClick={logout}
+            onClick={handleLogout}
             className="w-7 h-7 rounded-md flex items-center justify-center text-[#525252] hover:text-[#ef4444] hover:bg-[rgba(239,68,68,0.08)] transition-colors cursor-pointer shrink-0"
             title="Sign out"
           >

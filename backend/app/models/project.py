@@ -76,18 +76,18 @@ class ProjectResponse(BaseModel):
     """Project response schema."""
     project_id: str
     name: str
-    description: str
+    description: str = ""
     owner_id: str
-    members: list[str]
-    join_code: str
-    join_requests: list[str]
-    max_members: int
+    members: list[str] = Field(default_factory=list)
+    join_code: str = ""
+    join_requests: list[str] = Field(default_factory=list)
+    max_members: int = 10
     member_details: list[MemberDetail] = Field(default_factory=list)
     join_request_details: list[MemberDetail] = Field(default_factory=list)
-    github_repo_url: str
-    github_repo_name: str
-    discord_guild_id: str
-    discord_bot_active: bool
-    ingestion_status: IngestionStatus
+    github_repo_url: str = ""
+    github_repo_name: str = ""
+    discord_guild_id: str = ""
+    discord_bot_active: bool = False
+    ingestion_status: IngestionStatus = Field(default_factory=IngestionStatus)
     created_at: datetime
     updated_at: datetime

@@ -22,6 +22,11 @@ import {
   Users,
   Trash2,
   Network,
+  Folder,
+  UserPlus,
+  X,
+  Check,
+  RefreshCw,
 } from "lucide-react";
 import { GithubIcon } from "@/components/shared/github-icon";
 import { DiscordIcon } from "@/components/shared/discord-icon";
