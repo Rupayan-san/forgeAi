@@ -1,7 +1,7 @@
 """RAG (Retrieval-Augmented Generation) service for Forge.
 
-Uses text-embedding-3-small for query embedding and gpt-4o-mini for generation.
-Keeps costs minimal while delivering grounded, citation-backed answers.
+Uses ProjectContextService to ground answers in Project Constitution, active Decisions,
+and Project Memory vector chunks with strict project isolation and source citations.
 """
 
 from datetime import datetime, timezone
@@ -11,32 +11,32 @@ from openai import AsyncOpenAI
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.config import settings
-from app.core.database import get_qdrant
-from app.services.embedding_service import EmbeddingService
-from app.services.qdrant_service import QdrantService
+from app.models.project import ProjectModel
 from app.models.chat import ChatMessageModel, SourceCitation
+from app.services.project_context_service import ProjectContextService
 
 
-SYSTEM_PROMPT = """You are Forge AI — a project knowledge assistant. You answer questions about a software project based ONLY on the retrieved context below. The context includes source code files, Discord conversations, and other project artifacts.
+SYSTEM_PROMPT = """You are Forge AI — an intelligent project knowledge assistant. You answer questions about a software project grounded strictly in the project context below, which includes the Project Constitution, active team Decisions, source code files, and communications.
 
 Rules:
-- Answer concisely and accurately using ONLY the provided context.
+- Answer concisely and accurately using the provided context.
+- Prioritize rules in the Project Constitution and active Decisions.
 - If the context doesn't contain enough information to answer, say so honestly.
 - When referencing specific files or code, mention the file path.
-- When referencing Discord messages, mention who said it and in which channel.
+- When referencing decisions, mention what was decided and why.
 - Use markdown formatting for code blocks, lists, and emphasis.
 - Keep answers focused and practical.
 
-Retrieved Context:
+Project Context:
 {context}"""
 
 
 class RAGService:
-    """Retrieval-Augmented Generation pipeline."""
+    """Retrieval-Augmented Generation pipeline consuming unified Project Context."""
 
     def __init__(self):
         self.openai = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        self.embedding_service = EmbeddingService()
+        self.context_service = ProjectContextService()
         self.generation_model = "gpt-4o-mini"
 
     async def query(
@@ -48,72 +48,34 @@ class RAGService:
         db: AsyncIOMotorDatabase,
         interface_type: str = "text",
     ) -> dict:
-        """Full RAG pipeline: embed query → search Qdrant → generate answer → save history."""
+        """Full RAG pipeline: ProjectContext assembly → generate answer → save history."""
+        trace: list[str] = []
 
-        trace: list[str] = []  # <-- collect real step messages as we go
-
-        # 1. Embed the user's question
-        trace.append("Embedding your question with text-embedding-3-small...")
-        query_vector = await self.embedding_service.generate_single_embedding(user_message)
-
-        # 2. Search Qdrant for relevant chunks
-        trace.append(f"Searching project memory in Qdrant collection '{collection_name}'...")
-        qdrant = get_qdrant()
-        qdrant_service = QdrantService(qdrant)
-        results = await qdrant_service.search(
-            collection_name=collection_name,
-            query_vector=query_vector,
-            limit=8,
-        )
-        trace.append(f"Retrieved {len(results)} matching chunks")
-
-        # 3. Build context string and source citations
-        context_parts = []
-        sources = []
-        seen_sources = set()
-
-        for hit in results:
-            payload = hit["payload"]
-            content = payload.get("content", "")
-            source_type = payload.get("source_type", "unknown")
-            source_id = payload.get("source_id", "")
-            score = hit["score"]
-
-            # Build readable context label
-            if source_type == "github_file":
-                file_path = payload.get("file_path", source_id)
-                label = f"[File: {file_path}]"
-            elif source_type == "discord_message":
-                author = payload.get("author", "unknown")
-                channel = payload.get("channel", "unknown")
-                label = f"[Discord - #{channel} by {author}]"
-            else:
-                label = f"[{source_type}: {source_id}]"
-
-            context_parts.append(f"{label}\n{content}")
-
-            # Deduplicate sources
-            source_key = f"{source_type}:{source_id}"
-            if source_key not in seen_sources:
-                seen_sources.add(source_key)
-                sources.append(SourceCitation(
-                    source_type=source_type,
-                    source_id=source_id,
-                    source_url=payload.get("url", ""),
-                    relevance_score=round(score, 4),
-                    content_preview=content[:120],
-                ))
-
-        context = "\n\n---\n\n".join(context_parts) if context_parts else "No relevant context found."
-
-        # Real trace: mention which distinct source types were actually pulled in
-        distinct_types = sorted({s.source_type for s in sources})
-        if distinct_types:
-            trace.append(f"Deduped to {len(sources)} unique sources across: {', '.join(distinct_types)}")
+        # 1. Fetch project model
+        project_doc = await db["projects"].find_one({"project_id": project_id})
+        if project_doc:
+            project = ProjectModel(**project_doc)
         else:
-            trace.append("No relevant sources found in project memory")
+            project = ProjectModel(
+                project_id=project_id,
+                name="Project",
+                slug=project_id,
+                owner_id=user_id,
+                qdrant_collection_name=collection_name,
+            )
 
-        # 4. Save user message to chat history
+        # 2. Build unified project context
+        trace.append("Retrieving Project Constitution, active Decisions, and Memory chunks...")
+        context_result = await self.context_service.build_project_context(
+            project=project,
+            query_text=user_message,
+            db=db,
+        )
+        sources: list[SourceCitation] = context_result.citations
+        trace.extend(context_result.trace)
+        trace.append(f"Assembled context with {len(sources)} verified source citations")
+
+        # 3. Save user message to chat history
         user_msg = ChatMessageModel(
             message_id=str(ObjectId()),
             project_id=project_id,
@@ -126,7 +88,7 @@ class RAGService:
         )
         await db["chat_history"].insert_one(user_msg.model_dump(by_alias=True))
 
-        # 5. Fetch recent chat history for conversational context (last 6 messages)
+        # 4. Fetch recent chat history for conversational context (last 6 messages)
         trace.append("Loading recent conversation history...")
         history_cursor = db["chat_history"].find(
             {"project_id": project_id, "user_id": user_id},
@@ -137,12 +99,12 @@ class RAGService:
         history_docs.reverse()
 
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT.format(context=context)},
+            {"role": "system", "content": SYSTEM_PROMPT.format(context=context_result.formatted_context)},
         ]
         for doc in history_docs:
             messages.append({"role": doc["role"], "content": doc["content"]})
 
-        # 6. Call GPT-4o-mini
+        # 5. Call GPT-4o-mini
         trace.append("Generating grounded answer with gpt-4o-mini...")
         completion = await self.openai.chat.completions.create(
             model=self.generation_model,
@@ -150,10 +112,10 @@ class RAGService:
             temperature=0.3,
             max_tokens=1024,
         )
-        assistant_content = completion.choices[0].message.content
+        assistant_content = completion.choices[0].message.content or "I processed your request."
         trace.append("Answer generated and cited")
 
-        # 7. Save assistant response to chat history
+        # 6. Save assistant response to chat history
         assistant_msg = ChatMessageModel(
             message_id=str(ObjectId()),
             project_id=project_id,

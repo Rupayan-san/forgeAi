@@ -162,7 +162,15 @@ def start_services():
     processes.append(("Frontend", p_frontend))
     threading.Thread(target=stream_logs, args=(p_frontend, "FRONTEND", GREEN), daemon=True).start()
 
-    print(f"\n{BOLD}{GREEN}[OK] All services started! Press Ctrl+C to stop all services.{RESET}\n")
+    print(f"\n{BOLD}{GREEN}{'='*60}{RESET}")
+    print(f"{BOLD}{GREEN} [OK] Forge AI Full Stack & Observability Active!{RESET}")
+    print(f"{CYAN}  • Web App:          http://localhost:3000{RESET}")
+    print(f"{CYAN}  • Backend API:      http://localhost:8000{RESET}")
+    print(f"{CYAN}  • Prometheus Scrape:http://localhost:8000/metrics{RESET}")
+    print(f"{CYAN}  • Prometheus UI:    http://localhost:9090 (if running){RESET}")
+    print(f"{CYAN}  • Grafana UI:       http://localhost:3001 (if running){RESET}")
+    print(f"{CYAN}  • AI Evaluation:    python evaluate.py{RESET}")
+    print(f"{BOLD}{GREEN}{'='*60}{RESET}\n")
 
     # Keep main thread alive
     try:

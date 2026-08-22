@@ -1,0 +1,165 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "System & API Performance",
+      "type": "row"
+    },
+    {
+      "id": 1,
+      "title": "HTTP Request Rate (req/s)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 1 },
+      "targets": [
+        {
+          "expr": "sum(rate(forge_http_requests_total[1m])) by (method, status_code)",
+          "legendFormat": "{{method}} {{status_code}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "HTTP Latency (p50, p95, p99)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 1 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(forge_http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(forge_http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(forge_http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "HTTP Error Rate",
+      "type": "stat",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 1 },
+      "targets": [
+        {
+          "expr": "sum(rate(forge_http_requests_total{status_code=~\"5..\"}[5m])) / sum(rate(forge_http_requests_total[5m])) * 100",
+          "legendFormat": "5xx Error %"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 8 },
+      "id": 200,
+      "title": "AI & LLM Pipeline",
+      "type": "row"
+    },
+    {
+      "id": 4,
+      "title": "LLM Requests & Status",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 9 },
+      "targets": [
+        {
+          "expr": "sum(rate(forge_llm_requests_total[5m])) by (model, status)",
+          "legendFormat": "{{model}} - {{status}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "LLM Latency (p50, p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 9 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(forge_llm_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50 latency"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(forge_llm_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95 latency"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Tokens Processed",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 9 },
+      "targets": [
+        {
+          "expr": "sum(rate(forge_llm_tokens_total[5m])) by (token_type)",
+          "legendFormat": "{{token_type}} tokens/s"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
+      "id": 300,
+      "title": "RAG, Workers & Voice Meetings",
+      "type": "row"
+    },
+    {
+      "id": 7,
+      "title": "RAG Retrieval Latency (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 17 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(forge_retrieval_duration_seconds_bucket[5m])) by (le, source_type))",
+          "legendFormat": "{{source_type}} p95"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Worker Jobs & Duration",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 17 },
+      "targets": [
+        {
+          "expr": "sum(rate(forge_worker_jobs_total[5m])) by (job_type)",
+          "legendFormat": "{{job_type}} rate"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Voice AI Response Latency (p50, p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 17 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(forge_meeting_voice_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(forge_meeting_voice_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["forge", "observability", "ai"],
+  "time": { "from": "now-15m", "to": "now" },
+  "timezone": "browser",
+  "title": "Forge AI - System & AI Intelligence Dashboard",
+  "uid": "forge-observability",
+  "version": 1
+}

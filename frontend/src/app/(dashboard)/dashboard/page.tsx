@@ -1,15 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import Link from "next/link";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus,
   Zap,
   GitBranch,
   MessageSquare,
-  Brain,
-  ArrowRight,
   Loader2,
   Folder,
   Trash2,
@@ -17,10 +14,8 @@ import {
   FileText,
   Clock,
   ChevronRight,
-  ExternalLink,
   UserPlus,
   Users,
-  GitCommit,
 } from "lucide-react";
 import { GithubIcon } from "@/components/shared/github-icon";
 import { DiscordIcon } from "@/components/shared/discord-icon";
@@ -77,8 +72,8 @@ function JoinProjectDialog({
         setSuccess(false);
         onClose();
       }, 2000);
-    } catch (err: any) {
-      setError(err.message || "Failed to join project");
+    } catch (err: unknown) {
+      setError((err as Error).message || "Failed to join project");
     } finally {
       setIsJoining(false);
     }
@@ -161,6 +156,9 @@ function CreateProjectDialog({
   const [githubUrl, setGithubUrl] = useState("");
   const [discordGuildId, setDiscordGuildId] = useState("");
   const [maxMembers, setMaxMembers] = useState(10);
+  const [aiName, setAiName] = useState("Forge");
+  const [aiRole, setAiRole] = useState("Project Assistant");
+  const [showAiConfig, setShowAiConfig] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const { createProject } = useProjectStore();
 
@@ -174,12 +172,20 @@ function CreateProjectDialog({
         github_repo_url: githubUrl.trim(),
         discord_guild_id: discordGuildId.trim(),
         max_members: Number(maxMembers),
+        ai_config: {
+          name: aiName.trim() || "Forge",
+          role: aiRole.trim() || "Project Assistant",
+          invocation_phrase: aiName.trim() || "Forge",
+        },
       });
       setName("");
       setDescription("");
       setGithubUrl("");
       setDiscordGuildId("");
       setMaxMembers(10);
+      setAiName("Forge");
+      setAiRole("Project Assistant");
+      setShowAiConfig(false);
       onClose();
     } catch (err) {
       console.error("Failed to create project:", err);
@@ -198,28 +204,28 @@ function CreateProjectDialog({
         onClick={onClose}
       />
       {/* Dialog */}
-      <div className="surface relative z-10 w-full max-w-md mx-4 p-6 animate-scale-in">
-        <h2 className="text-base font-semibold text-[#fafafa] mb-0.5">New Project</h2>
+      <div className="surface relative z-10 w-full max-w-md mx-4 p-6 animate-scale-in max-h-[90vh] overflow-y-auto">
+        <h2 className="text-base font-semibold text-[#fafafa] mb-0.5">New Project Workspace</h2>
         <p className="text-[#525252] text-[13px] mb-5">
-          Connect your GitHub repository and Discord server to build project memory.
+          Create a first-class project workspace with integrated AI persona and vector memory.
         </p>
 
         <div className="space-y-3">
           <div>
-            <label className="block text-[12px] text-[#525252] mb-1 font-medium">
+            <label className="block text-[12px] text-[#737373] mb-1 font-medium">
               Project Name *
             </label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="My Awesome Project"
+              placeholder="e.g. Acme Web Engine"
               className="forge-input w-full px-3 py-2 text-[13px]"
               required
             />
           </div>
           <div>
-            <label className="block text-[12px] text-[#525252] mb-1 font-medium">
+            <label className="block text-[12px] text-[#737373] mb-1 font-medium">
               Description
             </label>
             <input
@@ -231,7 +237,7 @@ function CreateProjectDialog({
             />
           </div>
           <div>
-            <label className="block text-[12px] text-[#525252] mb-1 font-medium">
+            <label className="block text-[12px] text-[#737373] mb-1 font-medium">
               GitHub Repository URL
             </label>
             <input
@@ -243,9 +249,9 @@ function CreateProjectDialog({
             />
           </div>
           <div>
-            <label className="block text-[12px] text-[#525252] mb-1 font-medium flex items-center justify-between">
+            <label className="block text-[12px] text-[#737373] mb-1 font-medium flex items-center justify-between">
               <span>Discord Server ID (Guild ID)</span>
-              <span className="text-[10px] text-[#737373] font-normal">Optional</span>
+              <span className="text-[10px] text-[#525252] font-normal">Optional</span>
             </label>
             <input
               type="text"
@@ -255,19 +261,41 @@ function CreateProjectDialog({
               className="forge-input w-full px-3 py-2 text-[13px]"
             />
           </div>
-          <div>
-            <label className="block text-[12px] text-[#525252] mb-1 font-medium">
-              Maximum Members Allowed
-            </label>
-            <input
-              type="number"
-              min={1}
-              max={100}
-              value={maxMembers}
-              onChange={(e) => setMaxMembers(Math.max(1, Number(e.target.value)))}
-              placeholder="10"
-              className="forge-input w-full px-3 py-2 text-[13px]"
-            />
+
+          {/* AI Persona Customization Toggle */}
+          <div className="pt-2 border-t border-[#1a1a1a]">
+            <button
+              type="button"
+              onClick={() => setShowAiConfig(!showAiConfig)}
+              className="text-[12px] text-[#10b981] hover:text-[#34d399] font-medium flex items-center gap-1 cursor-pointer"
+            >
+              <span>{showAiConfig ? "− Hide AI Persona Options" : "+ Customize AI Identity & Persona"}</span>
+            </button>
+
+            {showAiConfig && (
+              <div className="mt-2.5 p-3 rounded-lg bg-[#0a0a0a] border border-[#222] space-y-2.5">
+                <div>
+                  <label className="block text-[11px] text-[#737373] mb-0.5">AI Display Name</label>
+                  <input
+                    type="text"
+                    value={aiName}
+                    onChange={(e) => setAiName(e.target.value)}
+                    placeholder="e.g. Atlas, Forge, Hermes"
+                    className="forge-input w-full px-2.5 py-1.5 text-[12px]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-[#737373] mb-0.5">AI Role / Persona</label>
+                  <input
+                    type="text"
+                    value={aiRole}
+                    onChange={(e) => setAiRole(e.target.value)}
+                    placeholder="e.g. Senior Software Architect"
+                    className="forge-input w-full px-2.5 py-1.5 text-[12px]"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -288,7 +316,7 @@ function CreateProjectDialog({
             ) : (
               <>
                 <Plus className="w-3.5 h-3.5" strokeWidth={2} />
-                Create
+                Create Workspace
               </>
             )}
           </button>
@@ -390,24 +418,25 @@ export default function DashboardPage() {
   const { user } = useAuthStore();
   const { projects, isLoading, fetchProjects } = useProjectStore();
 
-  const fetchPendingRequests = async () => {
+  const fetchPendingRequests = useCallback(async () => {
     try {
       const pending = await api.get<Project[]>("/projects/join/pending");
       setPendingProjects(pending || []);
     } catch {
       setPendingProjects([]);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (user) {
       fetchProjects();
-      fetchPendingRequests();
+      api.get<Project[]>("/projects/join/pending")
+        .then((pending) => setPendingProjects(pending || []))
+        .catch(() => setPendingProjects([]));
     }
   }, [user, fetchProjects]);
 
   useEffect(() => {
-    setIsLoadingActivity(true);
     api.get<ActivityItem[]>("/projects/activity/all")
       .then((data) => setActivities(data || []))
       .catch((err) => {

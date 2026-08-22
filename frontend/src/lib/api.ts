@@ -101,7 +101,7 @@ class ApiClient {
           ...options.headers,
         },
       });
-    } catch (networkErr: any) {
+    } catch (networkErr: unknown) {
       console.error(`[ApiClient Network Error] on ${endpoint}:`, networkErr);
       throw new Error(`Cannot connect to Forge API server (${this.baseUrl}). Please ensure backend is running.`);
     }
@@ -152,6 +152,13 @@ class ApiClient {
     });
   }
 
+  async patch<T>(endpoint: string, data?: unknown): Promise<T> {
+    return this.request<T>(endpoint, {
+      method: "PATCH",
+      body: data ? JSON.stringify(data) : undefined,
+    });
+  }
+
   async delete<T>(endpoint: string): Promise<T> {
     return this.request<T>(endpoint, { method: "DELETE" });
   }
@@ -164,7 +171,7 @@ class ApiClient {
         headers: this.getHeaders(),
         body: data ? JSON.stringify(data) : undefined,
       });
-    } catch (networkErr: any) {
+    } catch (networkErr: unknown) {
       console.error(`[ApiClient Stream Network Error] on ${endpoint}:`, networkErr);
       throw new Error(`Cannot connect to Forge API server (${this.baseUrl}).`);
     }

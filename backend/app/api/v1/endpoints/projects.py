@@ -1,137 +1,50 @@
 from datetime import datetime, timezone
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pydantic import BaseModel
 
+from app.core.config import settings
 from app.core.database import get_db, get_qdrant
 from app.api.v1.dependencies import get_current_user
+from app.api.v1.permissions import ProjectContext, require_project_member, require_project_owner
 from app.models.user import UserModel
-from app.models.project import ProjectModel, ProjectCreate, ProjectUpdate, ProjectResponse, IngestionStatus
-from app.services.qdrant_service import QdrantService
-
+from app.models.project import (
+    InviteSchema,
+    JoinRequestSchema,
+    MemberDetail,
+    MemberRoleUpdate,
+    ProjectAIConfig,
+    ProjectAIConfigUpdate,
+    ProjectCreate,
+    ProjectResponse,
+    ProjectRole,
+    ProjectSettingsUpdate,
+    ProjectUpdate,
+)
+from app.services.project_service import ProjectService
 from app.services.queue_service import enqueue_github_job
 from app.services.user_service import UserService
+from app.services.github_service import GitHubIngestionService, run_github_ingestion
+from app.services.discord_service import DiscordIngestionService
 from app.core.security import decrypt_token
 
 router = APIRouter()
 
 
-async def resolve_member_details(db: AsyncIOMotorDatabase, project_doc: dict) -> list[dict]:
-    member_ids = project_doc.get("members", [])
-    if not member_ids:
-        return []
-    cursor = db["users"].find({
-        "$or": [
-            {"user_id": {"$in": member_ids}},
-            {"_id": {"$in": [ObjectId(uid) for uid in member_ids if ObjectId.is_valid(uid)]}}
-        ]
-    })
-    users = await cursor.to_list(length=len(member_ids))
-    user_map = {}
-    for u in users:
-        uid = u.get("user_id") or str(u.get("_id"))
-        user_map[uid] = {
-            "user_id": uid,
-            "github_username": u.get("github_username", ""),
-            "name": u.get("name") or u.get("github_username", ""),
-            "avatar_url": u.get("avatar_url")
-        }
-    return [user_map.get(uid, {"user_id": uid, "github_username": f"user-{uid[:6]}", "name": "Member", "avatar_url": None}) for uid in member_ids]
+class GitHubConnectRequest(BaseModel):
+    github_repo_url: str
+    github_branch: str = "main"
 
 
-async def resolve_join_request_details(db: AsyncIOMotorDatabase, project_doc: dict) -> list[dict]:
-    request_ids = project_doc.get("join_requests", [])
-    if not request_ids:
-        return []
-    cursor = db["users"].find({
-        "$or": [
-            {"user_id": {"$in": request_ids}},
-            {"_id": {"$in": [ObjectId(uid) for uid in request_ids if ObjectId.is_valid(uid)]}}
-        ]
-    })
-    users = await cursor.to_list(length=len(request_ids))
-    user_map = {}
-    for u in users:
-        uid = u.get("user_id") or str(u.get("_id"))
-        user_map[uid] = {
-            "user_id": uid,
-            "github_username": u.get("github_username", ""),
-            "name": u.get("name") or u.get("github_username", ""),
-            "avatar_url": u.get("avatar_url")
-        }
-    return [user_map.get(uid, {"user_id": uid, "github_username": f"user-{uid[:6]}", "name": "Applicant", "avatar_url": None}) for uid in request_ids]
+class DiscordConnectRequest(BaseModel):
+    discord_guild_id: str
+    discord_channels: list[str] = []
 
 
-async def build_project_response(db: AsyncIOMotorDatabase, doc: dict) -> ProjectResponse:
-    member_details = await resolve_member_details(db, doc)
-    join_request_details = await resolve_join_request_details(db, doc)
-    model = ProjectModel(**doc)
-    return ProjectResponse(
-        **{
-            **model.model_dump(),
-            "member_details": member_details,
-            "join_request_details": join_request_details,
-        }
-    )
+class DiscordChannelsRequest(BaseModel):
+    discord_channels: list[str] = []
 
-
-import random
-import string
-
-@router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
-@router.post("/", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
-async def create_project(
-    project_data: ProjectCreate,
-    current_user: UserModel = Depends(get_current_user),
-    db: AsyncIOMotorDatabase = Depends(get_db),
-):
-    """Create a new project and initialize its Qdrant collection."""
-    project_id = str(ObjectId())
-    collection_name = f"forge_{project_id}"
-    join_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-
-    # Extract repo name from URL if provided
-    github_repo_name = ""
-    if project_data.github_repo_url:
-        clean_url = project_data.github_repo_url.strip().rstrip("/")
-        if clean_url.endswith(".git"):
-            clean_url = clean_url[:-4]
-        parts = clean_url.split("/")
-        if len(parts) >= 2:
-            github_repo_name = f"{parts[-2]}/{parts[-1]}"
-
-    project = ProjectModel(
-        project_id=project_id,
-        name=project_data.name,
-        description=project_data.description,
-        owner_id=current_user.user_id,
-        members=[current_user.user_id],
-        join_code=join_code,
-        join_requests=[],
-        max_members=project_data.max_members,
-        github_repo_url=project_data.github_repo_url,
-        github_repo_name=github_repo_name,
-        discord_guild_id=project_data.discord_guild_id.strip() if project_data.discord_guild_id else "",
-        qdrant_collection_name=collection_name,
-        ingestion_status=IngestionStatus(),
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-    )
-
-    # Insert into MongoDB
-    await db["projects"].insert_one(project.model_dump(by_alias=True))
-
-    # Create Qdrant collection
-    try:
-        qdrant = get_qdrant()
-        qdrant_service = QdrantService(qdrant)
-        await qdrant_service.ensure_collection(collection_name)
-    except Exception as e:
-        print(f"Warning: Failed to create Qdrant collection: {e}")
-
-    return await build_project_response(db, project.model_dump())
-
-from pydantic import BaseModel
 
 class ActivityItem(BaseModel):
     id: str
@@ -144,241 +57,18 @@ class ActivityItem(BaseModel):
     url: str = ""
 
 
-class JoinRequestSchema(BaseModel):
-    join_code: str
+# ==================== Project Collection Endpoints ====================
 
-@router.post("/join/request")
-async def request_join(
-    data: JoinRequestSchema,
+@router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
+async def create_project(
+    project_data: ProjectCreate,
     current_user: UserModel = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
-    """Request to join a project using a join code."""
-    code = data.join_code.strip().upper()
-    doc = await db["projects"].find_one({"join_code": code})
-    if not doc:
-        doc = await db["projects"].find_one({"join_code": {"$regex": f"^{code}$", "$options": "i"}})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Project not found or invalid join code")
-        
-    project = ProjectModel(**doc)
-    if len(project.members) >= project.max_members:
-        raise HTTPException(status_code=400, detail="This project has reached its maximum member limit.")
-        
-    if current_user.user_id in project.members:
-        return {"message": "Already a member"}
-        
-    if current_user.user_id not in project.join_requests:
-        await db["projects"].update_one(
-            {"project_id": project.project_id},
-            {"$push": {"join_requests": current_user.user_id}}
-        )
-    return {"message": "Join request sent"}
-
-
-@router.get("/join/pending", response_model=list[ProjectResponse])
-async def get_my_pending_projects(
-    current_user: UserModel = Depends(get_current_user),
-    db: AsyncIOMotorDatabase = Depends(get_db),
-):
-    """Get all projects where the current user has sent a join request that is pending approval."""
-    uid = current_user.user_id
-    query_conditions = [{"join_requests": uid}]
-    if ObjectId.is_valid(uid):
-        query_conditions.append({"join_requests": ObjectId(uid)})
-
-    cursor = db["projects"].find({"$or": query_conditions})
-    projects = []
-    async for doc in cursor:
-        resp = await build_project_response(db, doc)
-        projects.append(resp)
-    return projects
-
-
-@router.get("/{project_id}/join/requests")
-async def get_join_requests(
-    project_id: str,
-    current_user: UserModel = Depends(get_current_user),
-    db: AsyncIOMotorDatabase = Depends(get_db),
-):
-    """Get pending join requests for a project (owner only)."""
-    doc = await db["projects"].find_one({"project_id": project_id, "owner_id": current_user.user_id})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Project not found or not owner")
-
-    project = ProjectModel(**doc)
-    join_request_uids = project.join_requests or []
-    if not join_request_uids:
-        return []
-
-    cursor = db["users"].find({
-        "$or": [
-            {"user_id": {"$in": join_request_uids}},
-            {"_id": {"$in": [ObjectId(uid) for uid in join_request_uids if ObjectId.is_valid(uid)]}}
-        ]
-    })
-    users = await cursor.to_list(length=len(join_request_uids))
-    user_map = {}
-    for u in users:
-        uid = u.get("user_id") or str(u.get("_id"))
-        user_map[uid] = u
-
-    return [
-        {
-            "request_id": uid,
-            "user_id": uid,
-            "user_name": user_map.get(uid, {}).get("name") or user_map.get(uid, {}).get("github_username", "Unknown User"),
-            "github_username": user_map.get(uid, {}).get("github_username", ""),
-            "avatar_url": user_map.get(uid, {}).get("avatar_url", ""),
-            "status": "pending",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        for uid in join_request_uids
-    ]
-
-
-@router.post("/{project_id}/join/approve/{user_id}")
-@router.post("/{project_id}/join/requests/{user_id}/approve")
-async def approve_join(
-    project_id: str,
-    user_id: str,
-    current_user: UserModel = Depends(get_current_user),
-    db: AsyncIOMotorDatabase = Depends(get_db),
-):
-    """Approve a join request."""
-    doc = await db["projects"].find_one({"project_id": project_id, "owner_id": current_user.user_id})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Project not found or not owner")
-        
-    project = ProjectModel(**doc)
-    if len(project.members) >= project.max_members:
-        raise HTTPException(status_code=400, detail="This project has reached its maximum member limit.")
-
-    await db["projects"].update_one(
-        {"project_id": project_id},
-        {
-            "$pull": {"join_requests": user_id},
-            "$addToSet": {"members": user_id}
-        }
-    )
-    # Create welcome message
-    from app.models.chat import ChatMessageModel
-    welcome_msg = ChatMessageModel(
-        message_id=str(ObjectId()),
-        project_id=project_id,
-        user_id=user_id,
-        role="assistant",
-        content=f"Welcome to the project! Here is a brief description of what we are building:\n\n{project.description or 'No description provided.'}\n\nFeel free to ask me any questions about the repository or our team conversations!",
-        sources=[],
-        interface_type="text",
-        created_at=datetime.now(timezone.utc)
-    )
-    await db["chat_history"].insert_one(welcome_msg.model_dump(by_alias=True))
-        
-    return {"message": "User approved"}
-
-
-@router.post("/{project_id}/join/reject/{user_id}")
-@router.post("/{project_id}/join/requests/{user_id}/reject")
-async def reject_join(
-    project_id: str,
-    user_id: str,
-    current_user: UserModel = Depends(get_current_user),
-    db: AsyncIOMotorDatabase = Depends(get_db),
-):
-    """Reject a join request."""
-    doc = await db["projects"].find_one({"project_id": project_id, "owner_id": current_user.user_id})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Project not found or not owner")
-        
-    await db["projects"].update_one(
-        {"project_id": project_id},
-        {"$pull": {"join_requests": user_id}}
-    )
-    return {"message": "User rejected"}
-
-
-class InviteSchema(BaseModel):
-    github_username: str
-
-
-@router.post("/{project_id}/members/invite")
-@router.post("/{project_id}/invite")
-async def invite_member(
-    project_id: str,
-    data: InviteSchema,
-    current_user: UserModel = Depends(get_current_user),
-    db: AsyncIOMotorDatabase = Depends(get_db),
-):
-    """Invite a user by GitHub username."""
-    doc = await db["projects"].find_one({"project_id": project_id, "owner_id": current_user.user_id})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Project not found or not owner")
-        
-    project = ProjectModel(**doc)
-    if len(project.members) >= project.max_members:
-        raise HTTPException(status_code=400, detail="This project has reached its maximum member limit.")
-
-    user_doc = await db["users"].find_one({"github_username": data.github_username})
-    if not user_doc:
-        raise HTTPException(status_code=404, detail="User not found")
-        
-    invitee_id = user_doc["user_id"]
-    if invitee_id not in project.members:
-        await db["projects"].update_one(
-            {"project_id": project_id},
-            {"$addToSet": {"members": invitee_id}}
-        )
-        # Create welcome message
-        from app.models.chat import ChatMessageModel
-        welcome_msg = ChatMessageModel(
-            message_id=str(ObjectId()),
-            project_id=project_id,
-            user_id=invitee_id,
-            role="assistant",
-            content=f"Welcome to the project! Here is a brief description of what we are building:\n\n{project.description or 'No description provided.'}\n\nFeel free to ask me any questions about the repository or our team conversations!",
-            sources=[],
-            interface_type="text",
-            created_at=datetime.now(timezone.utc)
-        )
-        await db["chat_history"].insert_one(welcome_msg.model_dump(by_alias=True))
-        
-    return {"message": "User invited and added"}
-
-
-@router.post("/{project_id}/ingest/github")
-async def trigger_github_ingestion(
-    project_id: str,
-    current_user: UserModel = Depends(get_current_user),
-    db: AsyncIOMotorDatabase = Depends(get_db),
-):
-    """Trigger background ingestion of the GitHub repository."""
-    # Verify project exists and user is a member
-    doc = await db["projects"].find_one({
-        "project_id": project_id,
-        "members": current_user.user_id,
-    })
-    if not doc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-        
-    project = ProjectModel(**doc)
-    if not project.github_repo_name:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project has no GitHub repository configured")
-
-    # Get user's decrypted GitHub token
-    user_service = UserService(db)
-    user = await user_service.get_by_id(current_user.user_id)
-    
-    if not user or not user.github_access_token:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User GitHub token missing")
-        
-    decrypted_token = decrypt_token(user.github_access_token)
-    
-    # Enqueue job
-    from app.services.github_service import run_github_ingestion
-    job_info = enqueue_github_job(run_github_ingestion, project_id=project_id, access_token=decrypted_token)
-    
-    return {"message": "Ingestion started", "job_id": job_info["job_id"]}
+    """Create a new project workspace."""
+    service = ProjectService(db)
+    return await service.create_project(current_user, project_data)
 
 
 @router.get("", response_model=list[ProjectResponse])
@@ -388,23 +78,34 @@ async def list_projects(
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
     """List all projects the current user is a member of or owns."""
-    uid = current_user.user_id
-    query_conditions = [
-        {"members": uid},
-        {"owner_id": uid},
-    ]
-    if ObjectId.is_valid(uid):
-        query_conditions.extend([
-            {"members": ObjectId(uid)},
-            {"owner_id": ObjectId(uid)},
-        ])
-    cursor = db["projects"].find({"$or": query_conditions}).sort("created_at", -1)
-    projects = []
-    async for doc in cursor:
-        resp = await build_project_response(db, doc)
-        projects.append(resp)
-    return projects
+    service = ProjectService(db)
+    return await service.list_projects(current_user.user_id)
 
+
+# ==================== Join Requests ====================
+
+@router.post("/join/request")
+async def request_join(
+    data: JoinRequestSchema,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Request to join a project using a join code."""
+    service = ProjectService(db)
+    return await service.request_join(data.join_code, current_user.user_id)
+
+
+@router.get("/join/pending", response_model=list[ProjectResponse])
+async def get_my_pending_projects(
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Get all projects where the current user has sent a join request that is pending approval."""
+    service = ProjectService(db)
+    return await service.get_my_pending_projects(current_user.user_id)
+
+
+# ==================== Global Activity ====================
 
 @router.get("/activity/all", response_model=list[ActivityItem])
 async def get_all_recent_activity(
@@ -412,7 +113,13 @@ async def get_all_recent_activity(
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
     """Fetch global recent activity across all projects the user is a member of."""
-    cursor = db["projects"].find({"members": current_user.user_id})
+    cursor = db["projects"].find({
+        "$or": [
+            {"members": current_user.user_id},
+            {"owner_id": current_user.user_id},
+            {f"member_roles.{current_user.user_id}": {"$exists": True}},
+        ]
+    })
     user_projects = await cursor.to_list(length=50)
     if not user_projects:
         return []
@@ -420,7 +127,7 @@ async def get_all_recent_activity(
     project_ids = [p["project_id"] for p in user_projects]
     project_map = {p["project_id"]: p.get("name", "Project") for p in user_projects}
 
-    activities = []
+    activities: list[dict] = []
 
     # 1. Decisions across all user projects
     dec_cursor = db["decisions"].find({"project_id": {"$in": project_ids}}).sort("timestamp", -1).limit(15)
@@ -503,134 +210,236 @@ async def get_all_recent_activity(
             item["timestamp"] = datetime.now(timezone.utc).isoformat()
         else:
             item["timestamp"] = str(ts)
+
     return [ActivityItem(**item) for item in activities[:25]]
 
+
+# ==================== Individual Project Workspaces ====================
 
 @router.get("/{project_id}", response_model=ProjectResponse)
 async def get_project(
     project_id: str,
-    current_user: UserModel = Depends(get_current_user),
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    ctx: ProjectContext = Depends(require_project_member),
 ):
-    """Get a specific project by ID."""
-    doc = await db["projects"].find_one({
-        "project_id": project_id,
-        "members": current_user.user_id,
-    })
-    if not doc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    
-    return await build_project_response(db, doc)
+    """Get a specific project workspace by ID (Members only)."""
+    service = ProjectService(ctx.db)
+    return await service.build_project_response(ctx.project, ctx.user.user_id)
 
 
 @router.put("/{project_id}", response_model=ProjectResponse)
 async def update_project(
     project_id: str,
     update_data: ProjectUpdate,
-    current_user: UserModel = Depends(get_current_user),
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    ctx: ProjectContext = Depends(require_project_owner),
 ):
-    """Update a project's settings."""
-    doc = await db["projects"].find_one({
-        "project_id": project_id,
-        "owner_id": current_user.user_id,
-    })
-    if not doc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found or not owner")
-
-    update_dict = {k: v for k, v in update_data.model_dump().items() if v is not None}
-    update_dict["updated_at"] = datetime.now(timezone.utc)
-
-    # Also update github_repo_name if github_repo_url changed
-    if "github_repo_url" in update_dict and update_dict["github_repo_url"]:
-        clean_url = update_dict["github_repo_url"].strip().rstrip("/")
-        if clean_url.endswith(".git"):
-            clean_url = clean_url[:-4]
-        parts = clean_url.split("/")
-        if len(parts) >= 2:
-            update_dict["github_repo_name"] = f"{parts[-2]}/{parts[-1]}"
-
-    await db["projects"].update_one(
-        {"project_id": project_id},
-        {"$set": update_dict}
-    )
-
-    updated_doc = await db["projects"].find_one({"project_id": project_id})
-    return await build_project_response(db, updated_doc)
+    """Update a project's settings (Owner only)."""
+    service = ProjectService(ctx.db)
+    return await service.update_project(ctx.project, update_data, ctx.user.user_id)
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_project(
     project_id: str,
-    current_user: UserModel = Depends(get_current_user),
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    ctx: ProjectContext = Depends(require_project_owner),
 ):
-    """Delete a project and its Qdrant collection."""
-    doc = await db["projects"].find_one({
-        "project_id": project_id,
-        "owner_id": current_user.user_id,
-    })
-    if not doc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found or not owner")
+    """Delete a project and its associated data (Owner only)."""
+    service = ProjectService(ctx.db)
+    await service.delete_project(ctx.project)
 
-    # Delete Qdrant collection
-    try:
-        qdrant = get_qdrant()
-        qdrant_service = QdrantService(qdrant)
-        collection_name = doc.get("qdrant_collection_name", f"forge_{project_id}")
-        await qdrant_service.delete_collection(collection_name)
-    except Exception as e:
-        print(f"Warning: Failed to delete Qdrant collection: {e}")
 
-    # Delete from MongoDB
-    await db["projects"].delete_one({"project_id": project_id})
-    # Also delete associated decisions and chat history
-    await db["decisions"].delete_many({"project_id": project_id})
-    await db["chat_history"].delete_many({"project_id": project_id})
+# ==================== Project Settings & AI Configuration ====================
+
+@router.get("/{project_id}/settings", response_model=ProjectResponse)
+async def get_project_settings(
+    project_id: str,
+    ctx: ProjectContext = Depends(require_project_member),
+):
+    """Get project configuration and settings (Members only)."""
+    service = ProjectService(ctx.db)
+    return await service.build_project_response(ctx.project, ctx.user.user_id)
+
+
+@router.put("/{project_id}/settings", response_model=ProjectResponse)
+async def update_project_settings(
+    project_id: str,
+    settings_data: ProjectSettingsUpdate,
+    ctx: ProjectContext = Depends(require_project_owner),
+):
+    """Update project configuration and settings (Owner only)."""
+    service = ProjectService(ctx.db)
+    return await service.update_project(ctx.project, settings_data, ctx.user.user_id)
+
+
+@router.get("/{project_id}/ai-config", response_model=ProjectAIConfig)
+async def get_ai_config(
+    project_id: str,
+    ctx: ProjectContext = Depends(require_project_member),
+):
+    """Get project AI persona and configuration (Members only)."""
+    service = ProjectService(ctx.db)
+    return await service.get_ai_config(ctx.project)
+
+
+@router.put("/{project_id}/ai-config", response_model=ProjectAIConfig)
+async def update_ai_config(
+    project_id: str,
+    ai_config: ProjectAIConfigUpdate,
+    ctx: ProjectContext = Depends(require_project_owner),
+):
+    """Update project AI persona and configuration (Owner only)."""
+    service = ProjectService(ctx.db)
+    return await service.update_ai_config(ctx.project, ai_config)
+
+
+# ==================== Members & Roles ====================
+
+@router.get("/{project_id}/members", response_model=list[MemberDetail])
+async def list_members(
+    project_id: str,
+    ctx: ProjectContext = Depends(require_project_member),
+):
+    """List all project members and their roles (Members only)."""
+    service = ProjectService(ctx.db)
+    return await service.get_members(ctx.project)
+
+
+@router.post("/{project_id}/members/invite", response_model=MemberDetail)
+@router.post("/{project_id}/invite", response_model=MemberDetail)
+async def invite_member(
+    project_id: str,
+    data: InviteSchema,
+    ctx: ProjectContext = Depends(require_project_owner),
+):
+    """Invite a user by GitHub username (Owner only)."""
+    service = ProjectService(ctx.db)
+    return await service.invite_member(ctx.project, data.github_username)
 
 
 @router.delete("/{project_id}/members/{user_id}")
-async def kick_member(
+async def remove_member(
     project_id: str,
     user_id: str,
-    current_user: UserModel = Depends(get_current_user),
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    ctx: ProjectContext = Depends(require_project_member),
 ):
-    """Kick a member from the project (owner only)."""
-    doc = await db["projects"].find_one({"project_id": project_id, "owner_id": current_user.user_id})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Project not found or not owner")
-        
-    project = ProjectModel(**doc)
-    if user_id == project.owner_id:
-        raise HTTPException(status_code=400, detail="Cannot kick the owner of the project")
-        
-    if user_id in project.members:
-        await db["projects"].update_one(
-            {"project_id": project_id},
-            {"$pull": {"members": user_id}}
+    """Remove a member from the project. Owner can remove any member; member can leave project."""
+    # If actor is not owner and is trying to remove someone else, reject
+    if ctx.role != ProjectRole.OWNER.value and ctx.user.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: You can only remove yourself from this project.",
         )
-    return {"message": "Member removed"}
+
+    service = ProjectService(ctx.db)
+    await service.remove_member(ctx.project, user_id, ctx.user.user_id)
+    return {"message": "Member removed successfully"}
+
+
+@router.put("/{project_id}/members/{user_id}/role", response_model=MemberDetail)
+async def update_member_role(
+    project_id: str,
+    user_id: str,
+    role_data: MemberRoleUpdate,
+    ctx: ProjectContext = Depends(require_project_owner),
+):
+    """Update a member's role between OWNER and MEMBER (Owner only)."""
+    service = ProjectService(ctx.db)
+    return await service.update_member_role(ctx.project, user_id, role_data.role, ctx.user.user_id)
+
+
+# ==================== Join Requests Management ====================
+
+@router.get("/{project_id}/join/requests")
+async def get_join_requests(
+    project_id: str,
+    ctx: ProjectContext = Depends(require_project_owner),
+):
+    """Get pending join requests for a project (Owner only)."""
+    service = ProjectService(ctx.db)
+    return await service.get_join_requests(ctx.project)
+
+
+@router.post("/{project_id}/join/approve/{user_id}")
+@router.post("/{project_id}/join/requests/{user_id}/approve")
+async def approve_join(
+    project_id: str,
+    user_id: str,
+    ctx: ProjectContext = Depends(require_project_owner),
+):
+    """Approve a join request (Owner only)."""
+    service = ProjectService(ctx.db)
+    return await service.approve_join_request(ctx.project, user_id)
+
+
+@router.post("/{project_id}/join/reject/{user_id}")
+@router.post("/{project_id}/join/requests/{user_id}/reject")
+async def reject_join(
+    project_id: str,
+    user_id: str,
+    ctx: ProjectContext = Depends(require_project_owner),
+):
+    """Reject a join request (Owner only)."""
+    service = ProjectService(ctx.db)
+    return await service.reject_join_request(ctx.project, user_id)
+
+
+# ==================== Ingestion & Activity ====================
+
+@router.post("/{project_id}/ingest/github")
+@router.post("/{project_id}/sync/github")
+async def trigger_github_ingestion(
+    project_id: str,
+    background_tasks: BackgroundTasks,
+    ctx: ProjectContext = Depends(require_project_member),
+):
+    """Trigger background ingestion of the GitHub repository (Members only)."""
+    raw_repo = ctx.project.github_repo_name or ctx.project.github_repo_url
+    if not raw_repo:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Project has no GitHub repository configured",
+        )
+
+    # Get user's decrypted GitHub token if available
+    user_service = UserService(ctx.db)
+    user = await user_service.get_by_id(ctx.user.user_id)
+
+    decrypted_token = ""
+    if user and user.github_access_token:
+        try:
+            decrypted_token = decrypt_token(user.github_access_token)
+        except Exception:
+            decrypted_token = ""
+
+    # Fallback to system GITHUB_TOKEN if user token is empty
+    if not decrypted_token:
+        decrypted_token = getattr(settings, "GITHUB_TOKEN", "") or getattr(settings, "GITHUB_PERSONAL_ACCESS_TOKEN", "")
+
+    # Enqueue job (try RQ Redis first, fallback to async background tasks)
+    from app.services.github_service import run_github_ingestion
+
+    try:
+        job_info = enqueue_github_job(run_github_ingestion, project_id=project_id, access_token=decrypted_token)
+        return {"message": "Ingestion started", "job_id": job_info["job_id"]}
+    except Exception as err:
+        print(f"RQ enqueue failed ({err}), running via FastAPI background tasks...")
+        from app.services.github_service import GitHubIngestionService
+
+        svc = GitHubIngestionService(project_id, decrypted_token)
+        background_tasks.add_task(svc.ingest_repository)
+        return {"message": "Ingestion started via background worker", "job_id": f"bg_{project_id}"}
 
 
 @router.get("/{project_id}/activity", response_model=list[ActivityItem])
 async def get_project_activity(
     project_id: str,
-    current_user: UserModel = Depends(get_current_user),
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    ctx: ProjectContext = Depends(require_project_member),
 ):
-    """Fetch real activity timeline for a project."""
-    doc = await db["projects"].find_one({
-        "project_id": project_id,
-        "members": current_user.user_id,
-    })
-    if not doc:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    activities = []
+    """Fetch real activity timeline for a project (Members only)."""
+    doc = ctx.project
+    activities: list[dict] = []
 
     # 1. Decisions extracted for this project
-    decisions_cursor = db["decisions"].find({"project_id": project_id}).sort("timestamp", -1).limit(10)
+    decisions_cursor = ctx.db["decisions"].find({"project_id": project_id}).sort("timestamp", -1).limit(10)
     async for dec in decisions_cursor:
         activities.append({
             "id": f"dec_{dec.get('_id')}",
@@ -644,7 +453,7 @@ async def get_project_activity(
         })
 
     # 2. Team Group Chat Messages
-    chat_cursor = db["group_chat_history"].find({"project_id": project_id}).sort("created_at", -1).limit(15)
+    chat_cursor = ctx.db["group_chat_history"].find({"project_id": project_id}).sort("created_at", -1).limit(15)
     async for msg in chat_cursor:
         activities.append({
             "id": f"gc_{msg.get('_id')}",
@@ -660,7 +469,7 @@ async def get_project_activity(
     # 3. Discord Messages from Qdrant vector memory
     try:
         qdrant = get_qdrant()
-        coll_name = doc.get("qdrant_collection_name", f"forge_{project_id}")
+        coll_name = doc.qdrant_collection_name or f"forge_{project_id}"
         records, _ = await qdrant.scroll(
             collection_name=coll_name,
             scroll_filter={
@@ -687,32 +496,31 @@ async def get_project_activity(
         pass
 
     # 4. GitHub Sync Activity
-    ingestion = doc.get("ingestion_status", {})
-    if ingestion.get("github_backfill_complete"):
+    ingestion = doc.ingestion_status
+    if ingestion and ingestion.github_backfill_complete:
         activities.append({
-            "id": f"sync_gh_{doc.get('project_id')}",
+            "id": f"sync_gh_{doc.project_id}",
             "type": "commit",
-            "title": f"GitHub Indexed: {doc.get('github_repo_name') or 'Repository'}",
-            "description": f"{ingestion.get('github_chunks_count', 0)} chunks vectorized and available for AI search",
+            "title": f"GitHub Indexed: {doc.github_repo_name or 'Repository'}",
+            "description": f"{ingestion.github_chunks_count} chunks vectorized and available for AI search",
             "author": "GitHub Integration",
             "source": "GitHub Sync",
-            "timestamp": ingestion.get("last_github_sync") or doc.get("updated_at", datetime.now(timezone.utc)).isoformat(),
-            "url": doc.get("github_repo_url", ""),
+            "timestamp": ingestion.last_github_sync or doc.updated_at.isoformat(),
+            "url": doc.github_repo_url,
         })
 
     # 5. Project Workspace Creation
     activities.append({
-        "id": f"proj_{doc.get('project_id')}",
+        "id": f"proj_{doc.project_id}",
         "type": "member",
-        "title": f"Project '{doc.get('name')}' created",
-        "description": doc.get("description") or "Project workspace initialized",
+        "title": f"Project '{doc.name}' created",
+        "description": doc.description or "Project workspace initialized",
         "author": "Project Owner",
         "source": "Forge Workspace",
-        "timestamp": doc.get("created_at", datetime.now(timezone.utc)).isoformat() if isinstance(doc.get("created_at"), datetime) else str(doc.get("created_at")),
+        "timestamp": doc.created_at.isoformat() if isinstance(doc.created_at, datetime) else str(doc.created_at),
         "url": "",
     })
 
-    # Sort all activities by timestamp descending
     def parse_time(item):
         ts = item.get("timestamp")
         if isinstance(ts, datetime):
@@ -734,4 +542,91 @@ async def get_project_activity(
             item["timestamp"] = datetime.now(timezone.utc).isoformat()
         else:
             item["timestamp"] = str(ts)
+
     return [ActivityItem(**item) for item in activities[:20]]
+
+
+# ==================== Step 6 & 7: GitHub & Discord Endpoints ====================
+
+@router.post("/{project_id}/github/connect")
+async def connect_github_repo(
+    body: GitHubConnectRequest,
+    context: ProjectContext = Depends(require_project_owner),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Connect a GitHub repository and branch to the project."""
+    repo_url = body.github_repo_url.strip()
+    branch = body.github_branch.strip() or "main"
+    service = ProjectService(db)
+    updated = await service.update_project(
+        context.project,
+        ProjectSettingsUpdate(github_repo_url=repo_url, github_branch=branch),
+        current_user_id=context.project.owner_id,
+    )
+    return {"message": "GitHub repository connected successfully", "project": updated}
+
+
+@router.post("/{project_id}/github/disconnect")
+async def disconnect_github_repo(
+    context: ProjectContext = Depends(require_project_owner),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Disconnect GitHub repository and purge memory vectors."""
+    success = await GitHubIngestionService.disconnect_repository(context.project.project_id, db)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to disconnect repository")
+    return {"message": "GitHub repository disconnected and memory purged"}
+
+
+@router.post("/{project_id}/github/webhook")
+async def github_webhook(
+    project_id: str,
+    payload: dict,
+    event_type: str = "push",
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Handle incoming GitHub push and pull_request webhook events."""
+    await GitHubIngestionService.handle_webhook_event(project_id, event_type, payload, db)
+    return {"status": "ok", "message": f"Processed {event_type} event for project {project_id}"}
+
+
+@router.post("/{project_id}/discord/connect")
+async def connect_discord_guild(
+    body: DiscordConnectRequest,
+    context: ProjectContext = Depends(require_project_owner),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Connect Discord server guild and configure monitored channels."""
+    success = await DiscordIngestionService.connect_guild(
+        context.project.project_id, body.discord_guild_id, body.discord_channels, db
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to connect Discord guild")
+    return {"message": "Discord server connected and channels configured"}
+
+
+@router.post("/{project_id}/discord/disconnect")
+async def disconnect_discord_guild(
+    context: ProjectContext = Depends(require_project_owner),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Disconnect Discord server and purge stored Discord memory."""
+    success = await DiscordIngestionService.disconnect_guild(context.project.project_id, db)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to disconnect Discord")
+    return {"message": "Discord disconnected and memory purged"}
+
+
+@router.post("/{project_id}/discord/channels")
+async def update_discord_channels(
+    body: DiscordChannelsRequest,
+    context: ProjectContext = Depends(require_project_owner),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Update monitored Discord channels list."""
+    success = await DiscordIngestionService.update_channels(
+        context.project.project_id, body.discord_channels, db
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to update Discord channels")
+    return {"message": "Discord channels updated successfully"}

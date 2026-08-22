@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   X,
   Check,
@@ -10,8 +10,8 @@ import {
   Hash,
   Copy,
   CheckCircle2,
-  HelpCircle,
   Unlink,
+  Layers,
 } from "lucide-react";
 import { DiscordIcon } from "@/components/shared/discord-icon";
 import { api } from "@/lib/api";
@@ -21,6 +21,7 @@ interface DiscordConnectDialogProps {
   onClose: () => void;
   projectId: string;
   currentGuildId?: string;
+  currentChannels?: string[];
   onSuccess: () => void;
 }
 
@@ -29,26 +30,19 @@ export function DiscordConnectDialog({
   onClose,
   projectId,
   currentGuildId = "",
+  currentChannels = [],
   onSuccess,
 }: DiscordConnectDialogProps) {
-  const [guildId, setGuildId] = useState("");
+  const [guildId, setGuildId] = useState(currentGuildId || "");
+  const [channelsInput, setChannelsInput] = useState((currentChannels || []).join(", "));
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const [copiedBotLink, setCopiedBotLink] = useState(false);
 
-  // Default bot invite permissions (Read Messages, Send Messages, Read History, Embed Links)
-  const botInviteUrl = "https://discord.com/oauth2/authorize?permissions=68608&scope=bot%20applications.commands";
-
-  useEffect(() => {
-    if (isOpen) {
-      setGuildId(currentGuildId || "");
-      setError("");
-      setSuccessMsg("");
-    }
-  }, [isOpen, currentGuildId]);
-
   if (!isOpen) return null;
+
+  const botInviteUrl = "https://discord.com/oauth2/authorize?permissions=68608&scope=bot%20applications.commands";
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,39 +55,46 @@ export function DiscordConnectDialog({
     setError("");
     setSuccessMsg("");
 
+    const channels = channelsInput
+      .split(",")
+      .map((c) => c.trim().replace(/^#/, ""))
+      .filter((c) => c.length > 0);
+
     try {
-      await api.put(`/projects/${projectId}`, {
+      await api.post(`/projects/${projectId}/discord/connect`, {
         discord_guild_id: guildId.trim(),
+        discord_channels: channels,
       });
-      setSuccessMsg("Discord server linked successfully!");
+      setSuccessMsg("Discord server linked and channel filters saved!");
       onSuccess();
       setTimeout(() => {
         onClose();
-      }, 1500);
-    } catch (err: any) {
-      setError(err.message || "Failed to link Discord server.");
+      }, 1200);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to link Discord server.";
+      setError(msg);
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleDisconnect = async () => {
-    if (!confirm("Are you sure you want to disconnect Discord from this project?")) return;
+    if (!confirm("Are you sure you want to disconnect Discord and purge stored messages?")) return;
     setIsSaving(true);
     setError("");
 
     try {
-      await api.put(`/projects/${projectId}`, {
-        discord_guild_id: "",
-      });
+      await api.post(`/projects/${projectId}/discord/disconnect`);
       setGuildId("");
-      setSuccessMsg("Discord disconnected.");
+      setChannelsInput("");
+      setSuccessMsg("Discord disconnected and vector memory purged.");
       onSuccess();
       setTimeout(() => {
         onClose();
       }, 1200);
-    } catch (err: any) {
-      setError(err.message || "Failed to disconnect Discord.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to disconnect Discord.";
+      setError(msg);
     } finally {
       setIsSaving(false);
     }
@@ -120,7 +121,7 @@ export function DiscordConnectDialog({
             </div>
             <div>
               <h2 className="text-[15px] font-semibold text-[#fafafa] tracking-tight">
-                Connect Discord Server
+                Discord Project Knowledge
               </h2>
               <p className="text-[12px] text-[#737373]">
                 Capture team discussions and architectural decisions directly into memory.
@@ -182,7 +183,7 @@ export function DiscordConnectDialog({
                 Step 2
               </span>
               <label className="block text-[13px] font-medium text-[#fafafa] mt-0.5">
-                Enter Discord Server ID (Guild ID)
+                Discord Server ID (Guild ID)
               </label>
               <p className="text-[12px] text-[#737373] mt-0.5">
                 Right-click your server name in Discord and select <strong className="text-[#a3a3a3]">&quot;Copy Server ID&quot;</strong>.
@@ -201,10 +202,26 @@ export function DiscordConnectDialog({
                   required
                 />
               </div>
-              <p className="text-[11px] text-[#525252] mt-1.5 flex items-center gap-1">
-                <HelpCircle className="w-3 h-3 shrink-0" />
-                Don&apos;t see &quot;Copy Server ID&quot;? Enable Developer Mode in Discord: Settings &gt; Advanced &gt; Developer Mode.
+            </div>
+
+            {/* Channels Whitelist Config */}
+            <div>
+              <label className="block text-[13px] font-medium text-[#fafafa] mt-2">
+                Monitored Channels (Optional)
+              </label>
+              <p className="text-[12px] text-[#737373] mb-1.5">
+                Comma-separated list of channel names (e.g. <span className="text-zinc-400 font-mono">general, architecture, dev</span>). Leave blank to listen to all channels.
               </p>
+              <div className="relative">
+                <Layers className="w-4 h-4 text-[#525252] absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  value={channelsInput}
+                  onChange={(e) => setChannelsInput(e.target.value)}
+                  placeholder="general, architecture, backend"
+                  className="forge-input w-full pl-9 pr-3 py-2 text-[13px]"
+                />
+              </div>
             </div>
 
             {error && (
@@ -255,7 +272,7 @@ export function DiscordConnectDialog({
                   ) : (
                     <Check className="w-3.5 h-3.5" />
                   )}
-                  {currentGuildId ? "Update Connection" : "Connect Discord"}
+                  {currentGuildId ? "Update Configuration" : "Connect Discord"}
                 </button>
               </div>
             </div>

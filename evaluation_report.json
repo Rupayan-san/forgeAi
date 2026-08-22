@@ -1,0 +1,75 @@
+{
+  "dataset_name": "forge_eval_benchmark_v1",
+  "run_timestamp": 1787388884.5014265,
+  "total_examples": 6,
+  "passed_examples": 6,
+  "average_groundedness": 0.8833,
+  "average_source_attribution": 1.0,
+  "p50_latency_ms": 15.0,
+  "p95_latency_ms": 15.0,
+  "total_tokens": 304,
+  "results": [
+    {
+      "example_id": "eval_rag_vector_store",
+      "category": "rag",
+      "query": "What vector database do we use and why did we choose it?",
+      "groundedness_score": 0.75,
+      "source_attribution_score": 1.0,
+      "latency_ms": 15.0,
+      "tokens_estimated": 44,
+      "status": "PASSED"
+    },
+    {
+      "example_id": "eval_rag_retrieval_strategy",
+      "category": "rag",
+      "query": "How does our hybrid retrieval search combine dense and sparse search?",
+      "groundedness_score": 0.8,
+      "source_attribution_score": 1.0,
+      "latency_ms": 15.0,
+      "tokens_estimated": 56,
+      "status": "PASSED"
+    },
+    {
+      "example_id": "eval_decision_redis_usage",
+      "category": "decisions",
+      "query": "What did we decide regarding Redis and token blacklisting?",
+      "groundedness_score": 1.0,
+      "source_attribution_score": 1.0,
+      "latency_ms": 15.0,
+      "tokens_estimated": 52,
+      "status": "PASSED"
+    },
+    {
+      "example_id": "eval_meeting_action_extraction",
+      "category": "meetings",
+      "query": "What action items were extracted from the RAG alignment meeting?",
+      "groundedness_score": 1.0,
+      "source_attribution_score": 1.0,
+      "latency_ms": 15.0,
+      "tokens_estimated": 48,
+      "status": "PASSED"
+    },
+    {
+      "example_id": "eval_project_current_state",
+      "category": "project_intelligence",
+      "query": "What is the current state and phase of the project?",
+      "groundedness_score": 0.75,
+      "source_attribution_score": 1.0,
+      "latency_ms": 15.0,
+      "tokens_estimated": 52,
+      "status": "PASSED"
+    },
+    {
+      "example_id": "eval_project_risks_blockers",
+      "category": "project_intelligence",
+      "query": "Are there any blocked action items or overdue tasks?",
+      "groundedness_score": 1.0,
+      "source_attribution_score": 1.0,
+      "latency_ms": 15.0,
+      "tokens_estimated": 52,
+      "status": "PASSED"
+    }
+  ],
+  "has_regressions": false,
+  "regression_details": []
+}

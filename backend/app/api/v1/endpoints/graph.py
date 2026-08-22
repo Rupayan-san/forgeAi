@@ -1,9 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from fastapi import APIRouter, Depends
 
-from app.core.database import get_db
-from app.api.v1.dependencies import get_current_user
-from app.models.user import UserModel
+from app.api.v1.permissions import ProjectContext, require_project_member
 from app.models.decision import DecisionModel
 
 router = APIRouter()
@@ -12,21 +9,12 @@ router = APIRouter()
 @router.get("/{project_id}/graph")
 async def get_project_graph(
     project_id: str,
-    current_user: UserModel = Depends(get_current_user),
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    ctx: ProjectContext = Depends(require_project_member),
 ):
     """Build a lightweight nodes/edges graph from existing decisions data.
     No new ingestion — pure aggregation over the decisions collection.
     """
-    # Verify project access
-    project_doc = await db["projects"].find_one({
-        "project_id": project_id,
-        "members": current_user.user_id,
-    })
-    if not project_doc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-
-    cursor = db["decisions"].find({"project_id": project_id})
+    cursor = ctx.db["decisions"].find({"project_id": project_id})
     decisions = [DecisionModel(**doc) async for doc in cursor]
 
     nodes: list[dict] = []

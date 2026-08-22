@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import {
   FileText,
@@ -13,32 +13,14 @@ import {
   Sparkles,
   Loader2,
   AlertTriangle,
+  CheckCircle2,
+  GitBranch,
+  ArrowRight,
+  ShieldCheck,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { getSourceConfig } from "@/lib/sourceTypes";
-
-interface ConflictInfo {
-  other_decision_id: string;
-  other_decision_text: string;
-  relationship: "conflict" | "supersedes";
-  explanation: string;
-}
-
-interface Decision {
-  decision_id: string;
-  project_id: string;
-  decision_text: string;
-  reasoning: string;
-  alternatives_considered?: string[];
-  participants?: string[];
-  source_type: string;
-  source_id: string;
-  source_url?: string;
-  timestamp?: string;
-  extracted_at?: string;
-  confidence_score?: number;
-  conflicts?: ConflictInfo[];
-}
+import { Decision, DecisionStatus } from "@/types";
 
 export default function DecisionsPage() {
   const params = useParams();
@@ -52,9 +34,11 @@ export default function DecisionsPage() {
   const [conflictMessage, setConflictMessage] = useState("");
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [view, setView] = useState<"timeline" | "table">("timeline");
+  const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState<string | null>(null);
 
-  const fetchDecisions = async () => {
+  const fetchDecisions = useCallback(async () => {
     try {
       const data = await api.get<Decision[]>(
         `/projects/${projectId}/decisions`
@@ -65,12 +49,28 @@ export default function DecisionsPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [projectId]);
 
   useEffect(() => {
+    let isMounted = true;
     if (projectId) {
-      fetchDecisions();
+      api.get<Decision[]>(`/projects/${projectId}/decisions`)
+        .then((data) => {
+          if (isMounted) {
+            setDecisions(data || []);
+            setIsLoading(false);
+          }
+        })
+        .catch((err) => {
+          if (isMounted) {
+            console.error("Failed to load decisions", err);
+            setIsLoading(false);
+          }
+        });
     }
+    return () => {
+      isMounted = false;
+    };
   }, [projectId]);
 
   const handleExtract = async () => {
@@ -80,7 +80,7 @@ export default function DecisionsPage() {
       const result = await api.post<{ message: string; count: number }>(
         `/projects/${projectId}/decisions/extract`
       );
-      setExtractMessage(result.message || "Decisions extracted successfully");
+      setExtractMessage(result.message || "Decisions extracted and reconciled");
       await fetchDecisions();
     } catch (err) {
       console.error(err);
@@ -109,6 +109,20 @@ export default function DecisionsPage() {
     }
   };
 
+  const handleStatusUpdate = async (decisionId: string, newStatus: DecisionStatus) => {
+    setIsUpdatingStatus(decisionId);
+    try {
+      await api.put(`/projects/${projectId}/decisions/${decisionId}/status`, {
+        status: newStatus,
+      });
+      await fetchDecisions();
+    } catch (err) {
+      console.error("Failed to update status", err);
+    } finally {
+      setIsUpdatingStatus(null);
+    }
+  };
+
   const toggleExpand = (id: string) => {
     setExpandedIds((prev) => {
       const next = new Set(prev);
@@ -118,30 +132,46 @@ export default function DecisionsPage() {
     });
   };
 
+  // Status counts
+  const activeCount = decisions.filter((d) => (d.status || "ACTIVE") === "ACTIVE").length;
+  const conflictCount = decisions.filter((d) => d.status === "CONFLICTED").length;
+  const supersededCount = decisions.filter((d) => d.status === "SUPERSEDED").length;
+
   const filtered = decisions.filter((d) => {
+    // 1. Status Filter
+    const currentStatus = d.status || "ACTIVE";
+    if (statusFilter !== "ALL" && currentStatus !== statusFilter) {
+      return false;
+    }
+
+    // 2. Source Filter
     if (sourceFilter === "all") return true;
     const norm = (d.source_type || "").toLowerCase();
-    if (sourceFilter === "pr") return norm.includes("pr");
-    if (sourceFilter === "commit") return norm.includes("commit");
+    if (sourceFilter === "github") return norm.includes("github") || norm.includes("file") || norm.includes("pr") || norm.includes("commit");
     if (sourceFilter === "discord") return norm.includes("discord");
+    if (sourceFilter === "chat") return norm.includes("chat");
     return norm === sourceFilter;
   });
 
-
-
   return (
-    <div className="p-6 lg:p-8 max-w-[1200px]">
+    <div className="p-6 lg:p-8 max-w-[1200px] space-y-6">
       {/* Header */}
-      <div className="flex items-start justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-lg font-semibold text-[#fafafa] tracking-tight">Decision Log</h1>
-          <p className="text-[#525252] text-[13px] mt-0.5">
-            AI-extracted architectural and product decisions with verified sources
+          <h1 className="text-xl font-bold text-[#fafafa] tracking-tight flex items-center gap-2.5">
+            Decision Intelligence
+            <span className="px-2 py-0.5 text-[11px] font-medium rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              Step 5
+            </span>
+          </h1>
+          <p className="text-[#737373] text-[13px] mt-1">
+            Structured architectural & product decisions with automatic deduplication, supersession, and conflict resolution.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+
+        <div className="flex items-center gap-2.5 flex-wrap">
           {extractMessage && (
-            <span className="text-[12px] text-[#10b981] font-mono animate-pulse">
+            <span className="text-[12px] text-emerald-400 font-mono animate-pulse">
               {extractMessage}
             </span>
           )}
@@ -156,7 +186,7 @@ export default function DecisionsPage() {
           <button
             onClick={handleExtract}
             disabled={isExtracting}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[#10b981] text-white text-[13px] font-medium hover:bg-[#059669] transition-colors disabled:opacity-40 cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-600 text-white text-[13px] font-medium hover:bg-emerald-500 transition-colors disabled:opacity-40 cursor-pointer shadow-sm"
           >
             {isExtracting ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={2} />
@@ -170,26 +200,26 @@ export default function DecisionsPage() {
           <button
             onClick={handleDetectConflicts}
             disabled={isDetectingConflicts || decisions.length < 2}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[#262626] text-[#fafafa] text-[13px] font-medium hover:bg-[#141414] transition-colors disabled:opacity-40 cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[#262626] bg-[#141414] text-[#fafafa] text-[13px] font-medium hover:bg-[#1f1f1f] transition-colors disabled:opacity-40 cursor-pointer"
             title={decisions.length < 2 ? "Need at least 2 decisions" : "Scan for contradicting decisions"}
           >
             {isDetectingConflicts ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={2} />
             ) : (
-              <AlertTriangle className="w-3.5 h-3.5" strokeWidth={2} />
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" strokeWidth={2} />
             )}
-            Detect Conflicts
+            Scan Conflicts
           </button>
 
           {/* View toggle */}
-          <div className="flex items-center rounded-md border border-[#1a1a1a] overflow-hidden">
+          <div className="flex items-center rounded-md border border-[#262626] bg-[#111111] overflow-hidden">
             <button
               onClick={() => setView("timeline")}
               title="Timeline view"
               className={`px-2.5 py-1.5 text-[12px] transition-colors cursor-pointer ${
                 view === "timeline"
-                  ? "bg-[#111111] text-[#fafafa]"
-                  : "text-[#525252] hover:text-[#737373]"
+                  ? "bg-[#222222] text-[#fafafa]"
+                  : "text-[#737373] hover:text-[#fafafa]"
               }`}
             >
               <Clock className="w-3.5 h-3.5" strokeWidth={1.5} />
@@ -199,8 +229,8 @@ export default function DecisionsPage() {
               title="Table view"
               className={`px-2.5 py-1.5 text-[12px] transition-colors cursor-pointer ${
                 view === "table"
-                  ? "bg-[#111111] text-[#fafafa]"
-                  : "text-[#525252] hover:text-[#737373]"
+                  ? "bg-[#222222] text-[#fafafa]"
+                  : "text-[#737373] hover:text-[#fafafa]"
               }`}
             >
               <List className="w-3.5 h-3.5" strokeWidth={1.5} />
@@ -209,53 +239,86 @@ export default function DecisionsPage() {
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-2 mb-5">
-        <Filter className="w-3.5 h-3.5 text-[#525252]" strokeWidth={1.5} />
-        {[
-          { key: "all", label: "All" },
-          { key: "pr", label: "Pull Requests" },
-          { key: "commit", label: "Commits" },
-          { key: "discord", label: "Discord" },
-        ].map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={() => setSourceFilter(key)}
-            className={`px-2.5 py-1 rounded-md text-[12px] transition-colors cursor-pointer ${
-              sourceFilter === key
-                ? "bg-[#111111] text-[#fafafa] border border-[#262626]"
-                : "text-[#525252] hover:text-[#737373] border border-transparent"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-        <span className="text-[11px] text-[#404040] ml-2">{filtered.length} decisions</span>
+      {/* Filter Tabs & Source Filter */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#222222] pb-3">
+        {/* Status Tabs */}
+        <div className="flex items-center gap-1 bg-[#111111] p-1 rounded-lg border border-[#222222]">
+          {[
+            { key: "ALL", label: "All Decisions", count: decisions.length },
+            { key: "ACTIVE", label: "Active", count: activeCount, color: "text-emerald-400" },
+            { key: "CONFLICTED", label: "Conflicted", count: conflictCount, color: "text-red-400" },
+            { key: "SUPERSEDED", label: "Superseded", count: supersededCount, color: "text-zinc-400" },
+          ].map(({ key, label, count, color }) => (
+            <button
+              key={key}
+              onClick={() => setStatusFilter(key)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium transition-all cursor-pointer ${
+                statusFilter === key
+                  ? "bg-[#222222] text-[#fafafa] shadow-sm"
+                  : "text-[#737373] hover:text-[#fafafa]"
+              }`}
+            >
+              <span>{label}</span>
+              <span
+                className={`text-[11px] px-1.5 py-0.2 rounded-full font-mono ${
+                  statusFilter === key
+                    ? "bg-[#333333] text-[#fafafa]"
+                    : "bg-[#181818] text-[#555555]"
+                } ${color || ""}`}
+              >
+                {count}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* Source Dropdown / Buttons */}
+        <div className="flex items-center gap-2">
+          <Filter className="w-3.5 h-3.5 text-[#525252]" strokeWidth={1.5} />
+          {[
+            { key: "all", label: "All Sources" },
+            { key: "github", label: "GitHub" },
+            { key: "discord", label: "Discord" },
+            { key: "chat", label: "Project Chat" },
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => setSourceFilter(key)}
+              className={`px-2.5 py-1 rounded-md text-[12px] transition-colors cursor-pointer ${
+                sourceFilter === key
+                  ? "bg-[#222222] text-[#fafafa] border border-[#333333]"
+                  : "text-[#737373] hover:text-[#fafafa] border border-transparent"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {isLoading ? (
         <div className="flex justify-center py-20">
-          <Loader2 className="w-5 h-5 text-[#10b981] animate-spin" strokeWidth={2} />
+          <Loader2 className="w-6 h-6 text-emerald-500 animate-spin" strokeWidth={2} />
         </div>
       ) : filtered.length === 0 ? (
-        <div className="surface p-12 text-center">
-          <FileText className="w-8 h-8 text-[#525252] mx-auto mb-3" strokeWidth={1.5} />
-          <h3 className="text-[14px] font-medium text-[#fafafa] mb-1">No decisions found</h3>
-          <p className="text-[#525252] text-[12px] max-w-sm mx-auto mb-4">
-            Click &ldquo;Extract Decisions&rdquo; above to parse commits, PR discussions, and chats into structured memory.
+        <div className="surface p-12 text-center border border-[#222222] rounded-xl">
+          <FileText className="w-10 h-10 text-[#525252] mx-auto mb-3" strokeWidth={1.5} />
+          <h3 className="text-[15px] font-semibold text-[#fafafa] mb-1">No decisions match filter</h3>
+          <p className="text-[#737373] text-[13px] max-w-md mx-auto mb-5">
+            Extract decisions from your repository code, discussions, and chat messages into structured project memory.
           </p>
           <button
             onClick={handleExtract}
             disabled={isExtracting}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#10b981] text-white text-[13px] font-medium rounded-md hover:bg-[#059669] transition-colors cursor-pointer"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-[13px] font-medium rounded-lg hover:bg-emerald-500 transition-colors cursor-pointer"
           >
-            <Sparkles className="w-3.5 h-3.5" strokeWidth={2} />
-            Extract Now
+            <Sparkles className="w-4 h-4" strokeWidth={2} />
+            Extract Decisions Now
           </button>
         </div>
       ) : view === "timeline" ? (
         /* Timeline view */
-        <div className="space-y-3">
+        <div className="space-y-4">
           {filtered.map((decision, i) => {
             const config = getSourceConfig(decision.source_type);
             const Icon = config.icon;
@@ -264,43 +327,63 @@ export default function DecisionsPage() {
             const isExpanded = expandedIds.has(decision.decision_id);
             const alternatives = decision.alternatives_considered || [];
             const participants = decision.participants || [];
+            const status = decision.status || "ACTIVE";
 
             return (
-              <div key={decision.decision_id || i} className="surface p-5 transition-colors">
+              <div
+                key={decision.decision_id || i}
+                className={`surface p-5 rounded-xl border transition-all ${
+                  status === "CONFLICTED"
+                    ? "border-red-500/30 bg-red-950/5"
+                    : status === "SUPERSEDED"
+                    ? "border-zinc-800/80 opacity-75"
+                    : "border-[#222222] hover:border-[#333333]"
+                }`}
+              >
                 <div className="flex items-start gap-4">
-                  {/* Timeline indicator */}
+                  {/* Icon indicator */}
                   <div className="flex flex-col items-center shrink-0">
                     <div
-                      className="w-8 h-8 rounded-md flex items-center justify-center"
-                      style={{ background: `${config.color}15` }}
+                      className={`w-9 h-9 rounded-lg flex items-center justify-center ${
+                        status === "CONFLICTED"
+                          ? "bg-red-500/10 text-red-400"
+                          : status === "SUPERSEDED"
+                          ? "bg-zinc-800 text-zinc-400"
+                          : "bg-emerald-500/10 text-emerald-400"
+                      }`}
                     >
-                      <Icon className="w-4 h-4" style={{ color: config.color }} strokeWidth={1.5} />
+                      <Icon className="w-4 h-4" strokeWidth={1.5} />
                     </div>
-                    {i < filtered.length - 1 && (
-                      <div className="w-px h-full min-h-[40px] bg-[#1a1a1a] mt-2" />
-                    )}
                   </div>
 
-                  {/* Content */}
+                  {/* Main Content */}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-3 mb-1.5">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-[14px] font-medium text-[#fafafa] leading-snug">
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        {/* Status Badge */}
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold uppercase tracking-wider ${
+                            status === "ACTIVE"
+                              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/25"
+                              : status === "CONFLICTED"
+                              ? "bg-red-500/10 text-red-400 border border-red-500/25"
+                              : "bg-zinc-800 text-zinc-400 border border-zinc-700"
+                          }`}
+                        >
+                          {status === "ACTIVE" && <CheckCircle2 className="w-3 h-3" strokeWidth={2} />}
+                          {status === "CONFLICTED" && <AlertTriangle className="w-3 h-3" strokeWidth={2} />}
+                          {status === "SUPERSEDED" && <GitBranch className="w-3 h-3" strokeWidth={2} />}
+                          {status}
+                        </span>
+
+                        <h3 className="text-[15px] font-semibold text-[#fafafa] leading-snug">
                           {decision.decision_text}
                         </h3>
-                        {decision.conflicts && decision.conflicts.length > 0 && (
-                          <span
-                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/25 text-[10px] text-red-400 font-medium shrink-0"
-                            title={decision.conflicts.map((c) => c.explanation).join(" | ")}
-                          >
-                            <AlertTriangle className="w-3 h-3" strokeWidth={2} />
-                            {decision.conflicts[0].relationship === "conflict" ? "Conflicts" : "Superseded"}
-                          </span>
-                        )}
                       </div>
+
                       <button
                         onClick={() => toggleExpand(decision.decision_id)}
-                        className="text-[#525252] hover:text-[#fafafa] transition-colors p-1 rounded cursor-pointer shrink-0"
+                        className="text-[#737373] hover:text-[#fafafa] transition-colors p-1 rounded cursor-pointer shrink-0"
                       >
                         {isExpanded ? (
                           <ChevronUp className="w-4 h-4" strokeWidth={1.5} />
@@ -310,21 +393,77 @@ export default function DecisionsPage() {
                       </button>
                     </div>
 
-                    <p className="text-[12px] text-[#737373] leading-relaxed mb-3">
+                    <p className="text-[13px] text-[#a3a3a3] leading-relaxed mb-3">
                       {decision.reasoning}
                     </p>
 
-                    {/* Alternatives if present or expanded */}
+                    {/* Supersedes / Superseded by banner */}
+                    {decision.supersedes && (
+                      <div className="mb-3 px-3 py-2 rounded-lg bg-emerald-950/20 border border-emerald-500/20 text-[12px] text-emerald-300 flex items-center gap-2">
+                        <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+                        <span>
+                          <strong>Supersedes older decision:</strong> (ID: {decision.supersedes.slice(0, 8)}...)
+                        </span>
+                      </div>
+                    )}
+
+                    {decision.superseded_by && (
+                      <div className="mb-3 px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700/50 text-[12px] text-zinc-400 flex items-center gap-2">
+                        <GitBranch className="w-3.5 h-3.5 shrink-0" />
+                        <span>
+                          <strong>Superseded by newer decision:</strong> (ID: {decision.superseded_by.slice(0, 8)}...)
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Conflict Explanation Block */}
+                    {decision.conflicts && decision.conflicts.length > 0 && (
+                      <div className="mb-3 p-3 rounded-lg bg-red-950/20 border border-red-500/25 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[11px] text-red-400 uppercase tracking-wider font-semibold flex items-center gap-1.5">
+                            <AlertTriangle className="w-3.5 h-3.5" strokeWidth={2} />
+                            Conflicting with {decision.conflicts.length} decision{decision.conflicts.length !== 1 ? "s" : ""}
+                          </p>
+
+                          {status === "CONFLICTED" && (
+                            <button
+                              onClick={() => handleStatusUpdate(decision.decision_id, "ACTIVE")}
+                              disabled={isUpdatingStatus === decision.decision_id}
+                              className="text-[11px] font-medium text-emerald-400 hover:text-emerald-300 px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 transition-colors cursor-pointer flex items-center gap-1"
+                            >
+                              <ShieldCheck className="w-3 h-3" />
+                              Resolve to Active
+                            </button>
+                          )}
+                        </div>
+
+                        {decision.conflicts.map((c, idx) => (
+                          <div key={idx} className="text-[12px] text-[#d4d4d4] bg-black/30 p-2 rounded border border-red-500/10">
+                            <span className="text-red-400 font-medium">
+                              {c.relationship === "conflict" ? "Conflict" : c.relationship}:
+                            </span>{" "}
+                            &ldquo;{c.other_decision_text}&rdquo;
+                            {c.explanation && (
+                              <p className="text-[11px] text-[#888888] mt-0.5">
+                                Reason: {c.explanation}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Alternatives considered */}
                     {alternatives.length > 0 && (
                       <div className="mb-3">
-                        <p className="text-[10px] text-[#404040] uppercase tracking-wider font-medium mb-1">
+                        <p className="text-[11px] text-[#737373] uppercase tracking-wider font-medium mb-1">
                           Alternatives considered
                         </p>
                         <div className="flex flex-wrap gap-1.5">
                           {alternatives.map((alt, idx) => (
                             <span
                               key={idx}
-                              className="px-2 py-0.5 rounded bg-[#111111] border border-[#1a1a1a] text-[11px] text-[#737373]"
+                              className="px-2 py-0.5 rounded bg-[#161616] border border-[#262626] text-[12px] text-[#a3a3a3]"
                             >
                               {alt}
                             </span>
@@ -333,40 +472,22 @@ export default function DecisionsPage() {
                       </div>
                     )}
 
-                    {/* Conflict Explanation Block */}
-                    {decision.conflicts && decision.conflicts.length > 0 && (
-                      <div className="mb-3 p-2.5 rounded-md bg-red-500/5 border border-red-500/20">
-                        <p className="text-[10px] text-red-400 uppercase tracking-wider font-medium mb-1.5 flex items-center gap-1">
-                          <AlertTriangle className="w-3 h-3" strokeWidth={2} />
-                          Conflicting with {decision.conflicts.length} other decision{decision.conflicts.length !== 1 ? "s" : ""}
-                        </p>
-                        {decision.conflicts.map((c, idx) => (
-                          <div key={idx} className="text-[11px] text-[#a3a3a3] mb-1 last:mb-0">
-                            <span className="text-red-400 font-medium">
-                              {c.relationship === "conflict" ? "Conflicts with" : "Superseded by"}:
-                            </span>{" "}
-                            &ldquo;{c.other_decision_text}&rdquo; — {c.explanation}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
                     {/* Meta Row */}
-                    <div className="flex items-center gap-4 flex-wrap pt-2 border-t border-white/5">
-                      <span className="forge-badge forge-badge-neutral">
+                    <div className="flex items-center gap-4 flex-wrap pt-3 border-t border-[#222222]">
+                      <span className="forge-badge forge-badge-neutral text-[11px]">
                         <Icon className="w-3 h-3" strokeWidth={2} />
                         {config.label} #{decision.source_id}
                       </span>
+
                       {participants.length > 0 && (
-                        <div className="flex items-center gap-1">
-                          <Users className="w-3 h-3 text-[#404040]" strokeWidth={2} />
-                          <span className="text-[11px] text-[#737373]">
-                            {participants.join(", ")}
-                          </span>
+                        <div className="flex items-center gap-1.5 text-[12px] text-[#737373]">
+                          <Users className="w-3 h-3 text-[#525252]" strokeWidth={2} />
+                          <span>{participants.join(", ")}</span>
                         </div>
                       )}
+
                       {decision.timestamp && (
-                        <span className="text-[11px] text-[#404040]" suppressHydrationWarning>
+                        <span className="text-[11px] text-[#525252]" suppressHydrationWarning>
                           {new Date(decision.timestamp).toLocaleDateString("en-US", {
                             month: "short",
                             day: "numeric",
@@ -374,9 +495,10 @@ export default function DecisionsPage() {
                           })}
                         </span>
                       )}
-                      {/* Confidence */}
+
+                      {/* Confidence Meter */}
                       <div className="flex items-center gap-1.5 ml-auto">
-                        <div className="w-12 h-1 bg-[#1a1a1a] rounded-full overflow-hidden">
+                        <div className="w-12 h-1.5 bg-[#1f1f1f] rounded-full overflow-hidden">
                           <div
                             className="h-full rounded-full"
                             style={{
@@ -385,7 +507,7 @@ export default function DecisionsPage() {
                             }}
                           />
                         </div>
-                        <span className="text-[10px] text-[#525252] font-mono">{confidencePct}%</span>
+                        <span className="text-[11px] text-[#737373] font-mono">{confidencePct}%</span>
                       </div>
                     </div>
                   </div>
@@ -396,12 +518,13 @@ export default function DecisionsPage() {
         </div>
       ) : (
         /* Table view */
-        <div className="surface overflow-hidden">
+        <div className="surface overflow-hidden rounded-xl border border-[#222222]">
           <div className="overflow-x-auto">
             <table className="forge-table">
               <thead>
                 <tr>
                   <th className="min-w-[280px]">Decision</th>
+                  <th>Status</th>
                   <th>Source</th>
                   <th>Participants</th>
                   <th>Confidence</th>
@@ -415,33 +538,47 @@ export default function DecisionsPage() {
                   const confidence = decision.confidence_score !== undefined ? decision.confidence_score : 0.9;
                   const confidencePct = Math.round(confidence * 100);
                   const participants = decision.participants || [];
+                  const status = decision.status || "ACTIVE";
 
                   return (
-                    <tr key={decision.decision_id || i} className="cursor-pointer">
+                    <tr key={decision.decision_id || i} className="hover:bg-[#141414] transition-colors">
                       <td>
                         <span className="text-[#fafafa] text-[13px] font-medium block">
                           {decision.decision_text}
                         </span>
                         {decision.reasoning && (
-                          <span className="text-[#525252] text-[11px] line-clamp-1 mt-0.5">
+                          <span className="text-[#737373] text-[11px] line-clamp-1 mt-0.5">
                             {decision.reasoning}
                           </span>
                         )}
                       </td>
                       <td>
-                        <span className="forge-badge forge-badge-neutral">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                            status === "ACTIVE"
+                              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/25"
+                              : status === "CONFLICTED"
+                              ? "bg-red-500/10 text-red-400 border border-red-500/25"
+                              : "bg-zinc-800 text-zinc-400 border border-zinc-700"
+                          }`}
+                        >
+                          {status}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="forge-badge forge-badge-neutral text-[11px]">
                           <Icon className="w-3 h-3" strokeWidth={2} />
                           {config.label}
                         </span>
                       </td>
                       <td>
-                        <span className="text-[12px] text-[#525252]">
-                          {participants.length > 0 ? `${participants.length} members` : "—"}
+                        <span className="text-[12px] text-[#737373]">
+                          {participants.length > 0 ? participants.join(", ") : "—"}
                         </span>
                       </td>
                       <td>
                         <div className="flex items-center gap-1.5">
-                          <div className="w-10 h-1 bg-[#1a1a1a] rounded-full overflow-hidden">
+                          <div className="w-10 h-1.5 bg-[#1f1f1f] rounded-full overflow-hidden">
                             <div
                               className="h-full rounded-full"
                               style={{
@@ -450,11 +587,11 @@ export default function DecisionsPage() {
                               }}
                             />
                           </div>
-                          <span className="text-[11px] text-[#525252] font-mono">{confidencePct}%</span>
+                          <span className="text-[11px] text-[#737373] font-mono">{confidencePct}%</span>
                         </div>
                       </td>
                       <td>
-                        <span className="text-[12px] text-[#525252]" suppressHydrationWarning>
+                        <span className="text-[12px] text-[#737373]" suppressHydrationWarning>
                           {decision.timestamp
                             ? new Date(decision.timestamp).toLocaleDateString("en-US", {
                                 month: "short",

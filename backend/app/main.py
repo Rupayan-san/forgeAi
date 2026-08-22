@@ -33,12 +33,21 @@ def create_app() -> FastAPI:
     # Include API router
     app.include_router(api_router, prefix=settings.API_V1_STR)
 
+    @app.get("/metrics")
+    async def prometheus_metrics():
+        """Prometheus metrics scrape endpoint."""
+        from fastapi.responses import Response
+        from app.telemetry.metrics import get_prometheus_metrics_payload
+        payload, content_type = get_prometheus_metrics_payload()
+        return Response(content=payload, media_type=content_type)
+
     @app.get("/")
     async def root():
         return {
             "name": settings.PROJECT_NAME,
             "version": "0.1.0",
             "docs": "/docs" if settings.DEBUG else "disabled",
+            "metrics": "/metrics",
         }
 
     return app

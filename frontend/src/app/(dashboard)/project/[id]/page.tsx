@@ -1,24 +1,16 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   MessageSquare,
   Mic,
   FileText,
-  GitBranch,
-  Hash,
-  ExternalLink,
-  CheckCircle2,
-  Circle,
   Loader2,
-  Clock,
   Database,
   ChevronRight,
   ArrowUpRight,
-  GitPullRequest,
-  GitCommit,
   Users,
   Trash2,
   Network,
@@ -27,6 +19,14 @@ import {
   X,
   Check,
   RefreshCw,
+  Sparkles,
+  Bot,
+  Settings,
+  Shield,
+  ShieldCheck,
+  Copy,
+  ScrollText,
+  Activity,
 } from "lucide-react";
 import { GithubIcon } from "@/components/shared/github-icon";
 import { DiscordIcon } from "@/components/shared/discord-icon";
@@ -34,7 +34,7 @@ import { DiscordConnectDialog } from "@/components/project/discord-connect-dialo
 import { useProjectStore } from "@/store/use-project-store";
 import { useAuthStore } from "@/store/use-auth-store";
 import { api } from "@/lib/api";
-import { ActivityItem } from "@/types";
+import { ActivityItem, MemberDetail } from "@/types";
 
 function formatRelativeTime(isoString: string): string {
   if (!isoString) return "Just now";
@@ -61,11 +61,17 @@ function formatRelativeTime(isoString: string): string {
 
 export default function ProjectPage() {
   const params = useParams();
+  const router = useRouter();
   const projectId = params.id as string;
+
   const currentProject = useProjectStore((state) => state.currentProject);
   const fetchProject = useProjectStore((state) => state.fetchProject);
+  const updateMemberRole = useProjectStore((state) => state.updateMemberRole);
+  const removeMember = useProjectStore((state) => state.removeMember);
+  const inviteMember = useProjectStore((state) => state.inviteMember);
   const isLoading = useProjectStore((state) => state.isLoading);
   const user = useAuthStore((state) => state.user);
+
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
   const [discordModalOpen, setDiscordModalOpen] = useState(false);
@@ -73,16 +79,91 @@ export default function ProjectPage() {
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [isLoadingActivity, setIsLoadingActivity] = useState(true);
 
-  const isOwner = user?.user_id === currentProject?.owner_id;
+  // Quick invite state
+  const [showInviteInput, setShowInviteInput] = useState(false);
+  const [inviteUsername, setInviteUsername] = useState("");
+  const [isInviting, setIsInviting] = useState(false);
+  const [inviteFeedback, setInviteFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [changingRoleId, setChangingRoleId] = useState<string | null>(null);
 
-  const handleKick = async (memberId: string) => {
-    if (!confirm("Are you sure you want to remove this member from the project?")) return;
+  const isOwner =
+    currentProject?.user_role === "owner" ||
+    user?.user_id === currentProject?.owner_id ||
+    (currentProject?.member_roles && user?.user_id && currentProject.member_roles[user.user_id] === "owner");
+
+  useEffect(() => {
+    if (projectId) {
+      fetchProject(projectId);
+      api
+        .get<ActivityItem[]>(`/projects/${projectId}/activity`)
+        .then((data) => setActivities(data || []))
+        .catch((err) => {
+          console.error("Failed to fetch project activity:", err);
+          setActivities([]);
+        })
+        .finally(() => setIsLoadingActivity(false));
+    }
+  }, [projectId, fetchProject]);
+
+  const handleCopyJoinCode = () => {
+    if (currentProject?.join_code) {
+      navigator.clipboard.writeText(currentProject.join_code);
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 2000);
+    }
+  };
+
+  const handleKick = async (memberId: string, memberName: string) => {
+    const isSelf = memberId === user?.user_id;
+    const confirmText = isSelf
+      ? "Are you sure you want to leave this project?"
+      : `Are you sure you want to remove ${memberName} from this project?`;
+
+    if (!confirm(confirmText)) return;
+
     try {
-      await api.delete(`/projects/${projectId}/members/${memberId}`);
-      await fetchProject(projectId);
-    } catch (err) {
-      console.error("Failed to kick member:", err);
-      alert("Failed to remove member.");
+      await removeMember(projectId, memberId);
+      if (isSelf) {
+        router.push("/dashboard");
+      }
+    } catch (err: unknown) {
+      console.error("Failed to remove member:", err);
+      alert((err as Error).message || "Failed to remove member.");
+    }
+  };
+
+  const handleRoleChange = async (member: MemberDetail, newRole: "owner" | "member") => {
+    if (member.role === newRole) return;
+    setChangingRoleId(member.user_id);
+    try {
+      await updateMemberRole(projectId, member.user_id, newRole);
+    } catch (err: unknown) {
+      console.error("Failed to update role:", err);
+      alert((err as Error).message || "Failed to update member role.");
+    } finally {
+      setChangingRoleId(null);
+    }
+  };
+
+  const handleQuickInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteUsername.trim()) return;
+
+    setIsInviting(true);
+    setInviteFeedback(null);
+    try {
+      await inviteMember(projectId, inviteUsername.trim());
+      setInviteFeedback({ type: "success", text: `Added @${inviteUsername.trim()} to team!` });
+      setInviteUsername("");
+      setTimeout(() => {
+        setShowInviteInput(false);
+        setInviteFeedback(null);
+      }, 2000);
+    } catch (err: unknown) {
+      setInviteFeedback({ type: "error", text: (err as Error).message || "Failed to invite user." });
+    } finally {
+      setIsInviting(false);
     }
   };
 
@@ -111,20 +192,6 @@ export default function ProjectPage() {
       setProcessingJoinId(null);
     }
   };
-
-  useEffect(() => {
-    if (projectId) {
-      fetchProject(projectId);
-      setIsLoadingActivity(true);
-      api.get<ActivityItem[]>(`/projects/${projectId}/activity`)
-        .then((data) => setActivities(data || []))
-        .catch((err) => {
-          console.error("Failed to fetch project activity:", err);
-          setActivities([]);
-        })
-        .finally(() => setIsLoadingActivity(false));
-    }
-  }, [projectId, fetchProject]);
 
   const handleSyncGithub = async () => {
     setIsSyncing(true);
@@ -171,22 +238,29 @@ export default function ProjectPage() {
   }
 
   const p = currentProject;
+  const ai = p.ai_config || { name: "Forge", role: "Project Assistant", invocation_phrase: "Forge" };
   const totalChunks =
     p.ingestion_status.github_chunks_count +
     p.ingestion_status.discord_chunks_count;
 
   const features = [
     {
-      href: `/project/${projectId}/chat`,
-      icon: MessageSquare,
-      title: "Chat Q&A",
-      description: "Ask questions about your project with source citations",
+      href: `/project/${projectId}/intelligence`,
+      icon: Activity,
+      title: "Project Intelligence",
+      description: "Real-time derived project state, semantic changes, consistency checks, risks, and unified timeline",
     },
     {
-      href: `/project/${projectId}/group-chat`,
-      icon: Users,
-      title: "Team Group Chat",
-      description: "Chat with teammates. Decisions and configs are auto-indexed to memory",
+      href: `/project/${projectId}/constitution`,
+      icon: ScrollText,
+      title: "Project Constitution",
+      description: "Authoritative technical agreements, architecture rules, coding standards & Git workflows",
+    },
+    {
+      href: `/project/${projectId}/chat`,
+      icon: MessageSquare,
+      title: "Unified Team & AI Chat",
+      description: `Real-time team collaboration with @${ai.invocation_phrase || ai.name} assistant and Constitution memory`,
     },
     {
       href: `/project/${projectId}/voice`,
@@ -212,33 +286,89 @@ export default function ProjectPage() {
     <div className="p-6 lg:p-8 max-w-[1200px]">
       {/* Project Header */}
       <div className="mb-6">
-        <div className="flex items-start justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-lg font-semibold text-[#fafafa] tracking-tight">{p.name}</h1>
-              {p.join_code && (
-                <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-[#141414] border border-[#262626] text-[#10b981]">
-                  Join Code: {p.join_code}
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h1 className="text-xl font-semibold text-[#fafafa] tracking-tight">{p.name}</h1>
+              {isOwner ? (
+                <span className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <ShieldCheck className="w-3 h-3" />
+                  Owner
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-[#1a1a1a] text-[#a3a3a3] border border-[#262626]">
+                  <Shield className="w-3 h-3" />
+                  Member
                 </span>
               )}
+              {p.join_code && (
+                <button
+                  onClick={handleCopyJoinCode}
+                  className="flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[11px] font-mono bg-[#141414] border border-[#262626] text-[#10b981] hover:border-[#10b981]/40 transition-colors cursor-pointer"
+                  title="Click to copy join code"
+                >
+                  Join Code: {p.join_code}
+                  {copiedCode ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-[#737373]" />}
+                </button>
+              )}
             </div>
-            <p className="text-[#525252] text-[13px] mt-0.5">
+            <p className="text-[#737373] text-[13px] mt-1 max-w-2xl">
               {p.description || "No description provided"}
             </p>
           </div>
-          {p.github_repo_url && (
-            <a
-              href={p.github_repo_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[#262626] text-[#737373] text-[12px] hover:text-[#a3a3a3] hover:bg-[#0a0a0a] transition-colors"
+
+          <div className="flex items-center gap-2">
+            {p.github_repo_url && (
+              <a
+                href={p.github_repo_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[#262626] text-[#737373] text-[12px] hover:text-[#a3a3a3] hover:bg-[#0a0a0a] transition-colors"
+              >
+                <GithubIcon className="w-3.5 h-3.5" size={14} />
+                {p.github_repo_name || "Repository"}
+                <ArrowUpRight className="w-3 h-3" strokeWidth={2} />
+              </a>
+            )}
+            <Link
+              href="/settings"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[#262626] bg-[#111] text-[#a3a3a3] hover:text-[#fafafa] hover:border-[#404040] text-[12px] font-medium transition-colors"
             >
-              <GithubIcon className="w-3.5 h-3.5" size={14} />
-              {p.github_repo_name}
-              <ArrowUpRight className="w-3 h-3" strokeWidth={2} />
-            </a>
-          )}
+              <Settings className="w-3.5 h-3.5" />
+              Settings
+            </Link>
+          </div>
         </div>
+      </div>
+
+      {/* Project AI Persona Card */}
+      <div className="surface p-4 mb-6 border border-emerald-500/20 bg-gradient-to-r from-emerald-950/10 via-transparent to-transparent rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-start sm:items-center gap-3.5">
+          <div className="w-10 h-10 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center shrink-0 text-[#10b981]">
+            <Bot className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-[14px] font-semibold text-[#fafafa]">{ai.name}</span>
+              <span className="text-[11px] text-emerald-400 font-mono bg-emerald-500/10 px-1.5 py-0.25 rounded border border-emerald-500/20">
+                @{ai.invocation_phrase}
+              </span>
+              <span className="text-[10px] text-[#525252] font-mono">Project AI Persona</span>
+            </div>
+            <p className="text-[12px] text-[#a3a3a3] mt-0.5">
+              Role: <span className="text-[#fafafa] font-medium">{ai.role}</span>
+            </p>
+          </div>
+        </div>
+        {isOwner && (
+          <Link
+            href="/settings"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 text-[12px] font-medium transition-colors w-fit shrink-0"
+          >
+            <Sparkles className="w-3 h-3" />
+            Configure AI Identity
+          </Link>
+        )}
       </div>
 
       {/* Pending Join Requests Banner (Owner only) */}
@@ -253,15 +383,19 @@ export default function ProjectPage() {
                 Pending Join Requests ({p.join_requests.length})
               </h2>
             </div>
-            <span className="text-[11px] text-amber-400 font-mono">
-              Action Required
-            </span>
+            <span className="text-[11px] text-amber-400 font-mono">Action Required</span>
           </div>
 
           <div className="space-y-2">
             {(p.join_request_details && p.join_request_details.length > 0
               ? p.join_request_details
-              : p.join_requests.map((uid) => ({ user_id: uid, github_username: uid, name: "Applicant", avatar_url: null }))
+              : p.join_requests.map((uid) => ({
+                  user_id: uid,
+                  github_username: uid,
+                  name: "Applicant",
+                  avatar_url: null,
+                  role: "applicant" as const,
+                }))
             ).map((applicant) => (
               <div
                 key={applicant.user_id}
@@ -320,73 +454,91 @@ export default function ProjectPage() {
       {/* Ingestion & Team Status Cards */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-6">
         {/* GitHub Ingestion */}
-        <div className="surface p-4">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <GithubIcon className="w-4 h-4 text-[#a3a3a3]" size={16} />
-              <span className="text-[13px] font-medium text-[#fafafa]">GitHub</span>
+        <div className="surface p-4 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <GithubIcon className="w-4 h-4 text-[#a3a3a3]" size={16} />
+                <span className="text-[13px] font-medium text-[#fafafa]">GitHub</span>
+                {p?.github_branch && (
+                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#1c1c1c] text-[#a3a3a3] border border-[#2a2a2a] font-mono">
+                    {p.github_branch}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleSyncGithub}
+                  disabled={isSyncing || !p?.github_repo_url}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#141414] hover:bg-[#1f1f1f] text-[11px] font-medium text-[#fafafa] border border-[#262626] transition-colors disabled:opacity-40 cursor-pointer"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isSyncing ? "animate-spin" : ""}`} strokeWidth={1.5} />
+                  Sync
+                </button>
+                {p?.ingestion_status?.github_backfill_complete ? (
+                  <Check className="w-4 h-4 text-emerald-400" strokeWidth={2} />
+                ) : null}
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleSyncGithub}
-                disabled={isSyncing || !p?.github_repo_url}
-                className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#141414] hover:bg-[#1f1f1f] text-[11px] font-medium text-[#fafafa] border border-[#262626] transition-colors disabled:opacity-40 cursor-pointer"
-              >
-                <RefreshCw className={`w-3 h-3 ${isSyncing ? "animate-spin" : ""}`} strokeWidth={1.5} />
-                Sync
-              </button>
-              {p?.ingestion_status?.github_backfill_complete ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" strokeWidth={1.5} />
+            <p className="text-[12px] text-[#737373]">
+              {syncMessage ? (
+                <span className="text-[#10b981] font-mono animate-pulse">{syncMessage}</span>
+              ) : p?.ingestion_status?.last_github_error ? (
+                <span className="text-red-400 text-[11px] block truncate" title={p.ingestion_status.last_github_error}>
+                  Sync error: {p.ingestion_status.last_github_error}
+                </span>
+              ) : p?.ingestion_status?.github_backfill_complete ? (
+                `${p?.ingestion_status?.github_chunks_count || 0} chunks (${p?.ingestion_status?.indexed_commits_count || 0} commits, ${p?.ingestion_status?.indexed_prs_count || 0} PRs)`
+              ) : p?.github_repo_url ? (
+                "Ready to sync repository..."
               ) : (
-                <Circle className="w-4 h-4 text-[#404040]" strokeWidth={1.5} />
+                "Not connected"
               )}
-            </div>
+            </p>
           </div>
-          <p className="text-[12px] text-[#525252]">
-            {syncMessage ? (
-              <span className="text-[#10b981] font-mono animate-pulse">{syncMessage}</span>
-            ) : p?.ingestion_status?.github_backfill_complete ? (
-              `${p?.ingestion_status?.github_chunks_count || 0} chunks indexed`
-            ) : p?.github_repo_url ? (
-              "Ready to sync repository..."
-            ) : (
-              "Not connected"
-            )}
-          </p>
         </div>
 
         {/* Discord Ingestion */}
-        <div className="surface p-4">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <DiscordIcon className="w-4 h-4 text-[#5865F2]" size={16} />
-              <span className="text-[13px] font-medium text-[#fafafa]">Discord</span>
+        <div className="surface p-4 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <DiscordIcon className="w-4 h-4 text-[#5865F2]" size={16} />
+                <span className="text-[13px] font-medium text-[#fafafa]">Discord</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setDiscordModalOpen(true)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                    p?.discord_guild_id
+                      ? "bg-[#141414] hover:bg-[#1f1f1f] text-[#fafafa] border border-[#262626]"
+                      : "bg-[#5865F2] hover:bg-[#4752C4] text-white"
+                  }`}
+                >
+                  {p?.discord_guild_id ? "Configure" : "Connect"}
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setDiscordModalOpen(true)}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
-                  p?.discord_guild_id
-                    ? "bg-[#141414] hover:bg-[#1f1f1f] text-[#fafafa] border border-[#262626]"
-                    : "bg-[#5865F2] hover:bg-[#4752C4] text-white"
-                }`}
-              >
-                {p?.discord_guild_id ? "Configure" : "Connect"}
-              </button>
-              {p?.ingestion_status?.discord_backfill_complete ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" strokeWidth={1.5} />
-              ) : (
-                <Circle className={`w-4 h-4 ${p?.discord_guild_id ? "text-emerald-500/70" : "text-[#404040]"}`} strokeWidth={1.5} />
-              )}
-            </div>
+            <p className="text-[12px] text-[#737373]">
+              {p?.ingestion_status?.discord_backfill_complete
+                ? `${p?.ingestion_status?.discord_chunks_count || 0} chunks indexed`
+                : p?.discord_guild_id
+                  ? "Listening for messages..."
+                  : "Not connected"}
+            </p>
+            {p?.discord_channels && p.discord_channels.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {p.discord_channels.slice(0, 3).map((ch, idx) => (
+                  <span key={idx} className="text-[10px] px-1.5 py-0.2 rounded bg-[#161616] text-[#888] border border-[#262626] font-mono">
+                    #{ch}
+                  </span>
+                ))}
+                {p.discord_channels.length > 3 && (
+                  <span className="text-[10px] text-[#555] self-center">+{p.discord_channels.length - 3}</span>
+                )}
+              </div>
+            )}
           </div>
-          <p className="text-[12px] text-[#525252]">
-            {p?.ingestion_status?.discord_backfill_complete
-              ? `${p?.ingestion_status?.discord_chunks_count || 0} chunks indexed`
-              : p?.discord_guild_id
-                ? "Listening for messages..."
-                : "Not connected — click Connect to link server"}
-          </p>
         </div>
 
         {/* Team Members */}
@@ -394,42 +546,102 @@ export default function ProjectPage() {
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <Users className="w-4 h-4 text-[#a3a3a3]" strokeWidth={1.5} />
-              <span className="text-[13px] font-medium text-[#fafafa]">Team Members</span>
+              <span className="text-[13px] font-medium text-[#fafafa]">Project Members</span>
             </div>
-            <span className="text-[11px] text-[#525252] font-mono">
-              {p?.members?.length || 0} / {p?.max_members || 10} max
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-[#737373] font-mono">
+                {p?.members?.length || 0} / {p?.max_members || 10}
+              </span>
+              {isOwner && (
+                <button
+                  onClick={() => setShowInviteInput(!showInviteInput)}
+                  className="w-5 h-5 rounded flex items-center justify-center text-[#525252] hover:text-[#10b981] hover:bg-[#111] transition-colors cursor-pointer"
+                  title="Invite Member"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
           </div>
 
-          <div className="space-y-1.5 max-h-[80px] overflow-y-auto pr-1">
+          {/* Quick invite dropdown */}
+          {showInviteInput && isOwner && (
+            <form onSubmit={handleQuickInvite} className="mb-2 p-2 rounded bg-[#0a0a0a] border border-[#222]">
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  value={inviteUsername}
+                  onChange={(e) => setInviteUsername(e.target.value)}
+                  placeholder="GitHub username"
+                  className="forge-input flex-1 px-2 py-1 text-[11px]"
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  disabled={isInviting || !inviteUsername.trim()}
+                  className="px-2.5 py-1 rounded bg-[#10b981] text-white text-[11px] font-medium hover:bg-[#059669] disabled:opacity-40 cursor-pointer shrink-0"
+                >
+                  {isInviting ? <Loader2 className="w-3 h-3 animate-spin" /> : "Add"}
+                </button>
+              </div>
+              {inviteFeedback && (
+                <p className={`text-[10px] mt-1 ${inviteFeedback.type === "error" ? "text-red-400" : "text-emerald-400"}`}>
+                  {inviteFeedback.text}
+                </p>
+              )}
+            </form>
+          )}
+
+          <div className="space-y-1.5 max-h-[100px] overflow-y-auto pr-1">
             {p?.member_details?.map((member) => (
-              <div key={member.user_id} className="flex items-center justify-between py-0.5">
+              <div key={member.user_id} className="flex items-center justify-between py-1 border-b border-[#141414] last:border-none">
                 <div className="flex items-center gap-1.5 min-w-0">
                   {member.avatar_url ? (
-                    <img src={member.avatar_url} alt={member.github_username || ""} className="w-4 h-4 rounded-full shrink-0" />
+                    <img src={member.avatar_url} alt={member.github_username || ""} className="w-5 h-5 rounded-full shrink-0" />
                   ) : (
-                    <div className="w-4 h-4 rounded-full bg-[#1a1a1a] flex items-center justify-center text-[8px] text-white shrink-0 font-bold">
+                    <div className="w-5 h-5 rounded-full bg-[#1a1a1a] flex items-center justify-center text-[8px] text-white shrink-0 font-bold">
                       {(member.github_username || "??").substring(0, 2).toUpperCase()}
                     </div>
                   )}
-                  <span className="text-[11px] text-[#a3a3a3] truncate font-medium">
-                    {member.github_username || member.user_id}
+                  <span className="text-[12px] text-[#d4d4d4] truncate font-medium">
+                    {member.name || member.github_username}
                   </span>
-                  {member.user_id === p?.owner_id && (
-                    <span className="text-[9px] font-semibold text-[#10b981] bg-[rgba(16,185,129,0.1)] px-1 py-0.25 rounded shrink-0">
-                      Owner
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {isOwner && member.user_id !== p?.owner_id ? (
+                    <select
+                      value={member.role}
+                      disabled={changingRoleId === member.user_id}
+                      onChange={(e) => handleRoleChange(member, e.target.value as "owner" | "member")}
+                      className="text-[10px] bg-[#141414] border border-[#262626] rounded px-1.5 py-0.5 text-[#a3a3a3] hover:text-[#fafafa] cursor-pointer"
+                    >
+                      <option value="member">Member</option>
+                      <option value="owner">Owner</option>
+                    </select>
+                  ) : (
+                    <span
+                      className={`text-[9px] font-semibold px-1.5 py-0.25 rounded font-mono ${
+                        member.role === "owner"
+                          ? "text-[#10b981] bg-[rgba(16,185,129,0.1)] border border-emerald-500/20"
+                          : "text-[#737373] bg-[#141414] border border-[#222]"
+                      }`}
+                    >
+                      {member.role === "owner" ? "Owner" : "Member"}
                     </span>
                   )}
+
+                  {/* Remove action: Owner can remove non-primary owners; Members can remove themselves */}
+                  {(isOwner || member.user_id === user?.user_id) && member.user_id !== p?.owner_id && (
+                    <button
+                      onClick={() => handleKick(member.user_id, member.github_username)}
+                      className="text-[#525252] hover:text-red-400 p-0.5 rounded cursor-pointer transition-colors"
+                      title={member.user_id === user?.user_id ? "Leave Project" : "Remove Member"}
+                    >
+                      <Trash2 className="w-3 h-3" strokeWidth={1.5} />
+                    </button>
+                  )}
                 </div>
-                {p?.owner_id === user?.user_id && member.user_id !== p?.owner_id && (
-                  <button
-                    onClick={() => handleKick(member.user_id)}
-                    className="text-[#404040] hover:text-red-400 p-0.5 rounded cursor-pointer transition-colors"
-                    title="Remove Member"
-                  >
-                    <Trash2 className="w-3 h-3" strokeWidth={1.5} />
-                  </button>
-                )}
               </div>
             ))}
           </div>
@@ -563,6 +775,7 @@ export default function ProjectPage() {
         onClose={() => setDiscordModalOpen(false)}
         projectId={projectId}
         currentGuildId={p?.discord_guild_id}
+        currentChannels={p?.discord_channels}
         onSuccess={() => fetchProject(projectId, true)}
       />
     </div>
