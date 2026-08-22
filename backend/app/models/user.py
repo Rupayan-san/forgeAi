@@ -40,3 +40,24 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
+
+
+class RefreshTokenModel(BaseModel):
+    """MongoDB refresh_tokens document model."""
+    id: PyObjectId = Field(default_factory=lambda: str(ObjectId()), alias="_id")
+    token_hash: str           # SHA-256 hash of the opaque refresh token
+    user_id: str              # References UserModel.user_id
+    expires_at: datetime
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    class Config:
+        populate_by_name = True
+        arbitrary_types_allowed = True
+        json_encoders = {ObjectId: str}
+
+
+class TokenPairResponse(BaseModel):
+    """Response with access token (refresh token is set via HttpOnly cookie)."""
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse

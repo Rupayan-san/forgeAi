@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Zap,
   LayoutDashboard,
@@ -17,11 +17,19 @@ import { useAuthStore } from "@/store/use-auth-store";
 import { useProjectStore } from "@/store/use-project-store";
 import { useSearchStore } from "@/store/use-search-store";
 import { Badge } from "@/components/ui/badge";
+import { CreateProjectDialog } from "@/components/project/create-project-dialog";
 
 export function Sidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
-  const { projects } = useProjectStore();
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    await logout();
+    router.replace("/login");
+  };
+
+  const { projects, openCreateDialog } = useProjectStore();
   const { openSearch } = useSearchStore();
   const [projectsExpanded, setProjectsExpanded] = useState(true);
 
@@ -95,14 +103,14 @@ export function Sidebar() {
                 strokeWidth={2}
               />
             </button>
-            <Link
-              href="/dashboard"
-              prefetch={true}
-              title="New Project"
-              className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            <button
+              type="button"
+              onClick={openCreateDialog}
+              title="Create New Project"
+              className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" strokeWidth={2} />
-            </Link>
+            </button>
           </div>
 
           {projectsExpanded && (
@@ -195,14 +203,17 @@ export function Sidebar() {
             </p>
           </div>
           <button
-            onClick={logout}
-            className="w-7 h-7 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer shrink-0"
+            onClick={handleLogout}
+            className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer shrink-0"
             title="Sign out"
           >
             <LogOut className="w-4 h-4" strokeWidth={1.5} />
           </button>
         </div>
       </div>
+
+      {/* Global Project Creation Modal */}
+      <CreateProjectDialog />
     </aside>
   );
 }

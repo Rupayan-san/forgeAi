@@ -23,6 +23,7 @@ if sys.platform == "win32":
 from app.core.config import settings
 from app.services.embedding_service import EmbeddingService
 from app.services.qdrant_service import QdrantService
+from app.services.discord_service import DiscordIngestionService
 from app.models.project import ProjectModel
 
 class ForgeDiscordBot(discord.Client):
@@ -62,9 +63,7 @@ class ForgeDiscordBot(discord.Client):
         guild_id = str(message.guild.id)
         channel_name = message.channel.name if hasattr(message.channel, "name") else str(message.channel.id)
         
-        if not message.content or not message.content.strip():
-            print(f"⚠️ [Discord Bot] Message from @{message.author.name} in #{channel_name} has empty text.", flush=True)
-            print("   👉 If you sent text, make sure 'Message Content Intent' is ENABLED in Discord Developer Portal (Bot -> Privileged Gateway Intents).", flush=True)
+        if DiscordIngestionService.is_noise(message.content):
             return
 
         # Find all projects linked to this discord_guild_id
@@ -72,14 +71,13 @@ class ForgeDiscordBot(discord.Client):
         project_docs = await cursor.to_list(length=100)
         
         if not project_docs:
-            print(f"ℹ️ [Discord Bot] Message in '{message.guild.name}' (Guild ID: {guild_id}) by @{message.author.name}, but no Forge project is linked to this Guild ID.", flush=True)
             return
-
-        print(f"📩 [Discord Bot] Message from @{message.author.name} in #{channel_name} ('{message.guild.name}'): {message.content[:60]}...", flush=True)
-        print(f"   Linking to {len(project_docs)} project(s)...", flush=True)
 
         for project_doc in project_docs:
             project = ProjectModel(**project_doc)
+            # Check channel whitelist
+            if project.discord_channels and channel_name not in project.discord_channels and str(message.channel.id) not in project.discord_channels:
+                continue
             try:
                 metadata = {
                     "project_id": project.project_id,

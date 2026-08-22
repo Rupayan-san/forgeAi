@@ -1,3 +1,4 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,7 +10,8 @@ class Settings(BaseSettings):
     # Security
     SECRET_KEY: str = "dev-secret-key-change-in-production"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30  # Short-lived; refresh tokens handle persistence
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 15   # 15-day refresh token
 
     # MongoDB
     MONGODB_URL: str = "mongodb://localhost:27017"
@@ -20,16 +22,18 @@ class Settings(BaseSettings):
     QDRANT_API_KEY: str | None = None
 
     # OpenAI
-    OPENAI_API_KEY: str = ""
+    OPENAI_API_KEY: str = "sk-forge-dev-placeholder"
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
 
-    # GitHub OAuth
+    # GitHub OAuth & Access Tokens
     GITHUB_CLIENT_ID: str = ""
     GITHUB_CLIENT_SECRET: str = ""
     GITHUB_REDIRECT_URI: str = "http://localhost:8000/api/v1/auth/github/callback"
     GITHUB_WEBHOOK_SECRET: str = ""
+    GITHUB_TOKEN: str = ""
+    GITHUB_PERSONAL_ACCESS_TOKEN: str = ""
 
     # Agora
     AGORA_APP_ID: str = ""
@@ -45,6 +49,44 @@ class Settings(BaseSettings):
 
     # Frontend
     FRONTEND_URL: str = "http://localhost:3000"
+
+    # Observability & Telemetry (Step 12)
+    TELEMETRY_ENABLED: bool = True
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = "http://localhost:4318"
+    PROMETHEUS_PORT: int = 9090
+    GRAFANA_PORT: int = 3001
+    SERVICE_NAME: str = "forge-ai"
+    ENVIRONMENT: str = "development"
+
+    # LangSmith & Evaluation (Step 12)
+    LANGCHAIN_TRACING_V2: str = "false"
+    LANGCHAIN_API_KEY: str = ""
+    LANGCHAIN_PROJECT: str = "forge-ai"
+
+    @model_validator(mode="after")
+    def validate_production_secrets(self):
+        """Reject development placeholders outside explicit development mode."""
+        if self.ENVIRONMENT.lower() not in {"production", "prod", "staging"}:
+            return self
+
+        placeholders = {
+            "dev-secret-key-change-in-production",
+            "sk-forge-dev-placeholder",
+            "your-secret-key-change-in-production",
+        }
+        required = {
+            "SECRET_KEY": self.SECRET_KEY,
+            "MONGODB_URL": self.MONGODB_URL,
+            "OPENAI_API_KEY": self.OPENAI_API_KEY,
+            "QDRANT_URL": self.QDRANT_URL,
+            "REDIS_URL": self.REDIS_URL,
+        }
+        missing = [name for name, value in required.items() if not value or value in placeholders]
+        if missing:
+            raise ValueError(
+                f"Production/staging configuration requires real values for: {', '.join(missing)}"
+            )
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env",

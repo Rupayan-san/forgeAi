@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -11,6 +11,7 @@ import {
   Database,
   GitBranch,
   FileText,
+  MessageSquare,
   Loader2,
   Folder,
   Trash2,
@@ -24,11 +25,11 @@ import {
   Clock,
   ExternalLink,
   UserPlus,
-  MessageSquare,
   ShieldCheck,
   Radio,
   ArrowUpRight,
   RefreshCw,
+  Sparkles,
 } from "lucide-react";
 import { GithubIcon } from "@/components/shared/github-icon";
 import { DiscordIcon } from "@/components/shared/discord-icon";
@@ -40,14 +41,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog";
+import { CreateProjectDialog, JoinProjectDialog } from "@/components/project/create-project-dialog";
 
 function formatRelativeTime(isoString: string): string {
   if (!isoString) return "Just now";
@@ -55,7 +49,6 @@ function formatRelativeTime(isoString: string): string {
     let normalized = String(isoString).trim();
     if (!normalized) return "Just now";
 
-    // If date-time string without timezone indicator, treat as UTC
     if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(normalized)) {
       normalized = normalized.replace(" ", "T") + "Z";
     } else if (normalized.endsWith("+00:00")) {
@@ -68,7 +61,6 @@ function formatRelativeTime(isoString: string): string {
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
 
-    // Clock skew tolerance: if timestamp is slightly in the future (within 2 mins), treat as "Just now"
     if (diffMs < 0 && diffMs > -120000) return "Just now";
 
     const diffSec = Math.floor(diffMs / 1000);
@@ -86,285 +78,35 @@ function formatRelativeTime(isoString: string): string {
   }
 }
 
-function JoinProjectDialog({
-  isOpen,
-  onClose,
-}: {
-  isOpen: boolean;
-  onClose: () => void;
-}) {
-  const [joinCode, setJoinCode] = useState("");
-  const [isJoining, setIsJoining] = useState(false);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState(false);
-
-  const handleJoin = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!joinCode.trim() || joinCode.length !== 6) return;
-    setIsJoining(true);
-    setError("");
-    setSuccess(false);
-    try {
-      await api.post("/projects/join/request", { join_code: joinCode.trim().toUpperCase() });
-      setSuccess(true);
-      setTimeout(() => {
-        setJoinCode("");
-        setSuccess(false);
-        onClose();
-      }, 1500);
-    } catch (err: any) {
-      setError(err.message || "Failed to join project");
-    } finally {
-      setIsJoining(false);
-    }
-  };
-
-  return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-md bg-card border-border text-foreground">
-        <DialogHeader>
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-lg bg-accent flex items-center justify-center text-foreground">
-              <UserPlus className="w-5 h-5" />
-            </div>
-            <div>
-              <DialogTitle className="text-lg font-bold text-foreground">Join Project</DialogTitle>
-              <DialogDescription className="text-sm text-muted-foreground mt-0.5">
-                Enter the 6-character invitation code to join a team project.
-              </DialogDescription>
-            </div>
-          </div>
-        </DialogHeader>
-
-        <form onSubmit={handleJoin} className="space-y-4 py-2">
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-muted-foreground">Join Code</label>
-            <Input
-              type="text"
-              value={joinCode}
-              onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-              placeholder="e.g. X8F3A2"
-              maxLength={6}
-              className="h-11 px-3 text-center text-lg uppercase tracking-widest font-mono bg-background border-border focus-visible:ring-ring text-foreground placeholder:text-muted-foreground/60"
-              autoFocus
-            />
-            {error && <p className="text-rose-500 text-sm mt-1">{error}</p>}
-            {success && <p className="text-emerald-500 text-sm mt-1 font-medium">Join request sent successfully!</p>}
-          </div>
-
-          <DialogFooter className="gap-2 sm:gap-0 pt-3 border-t border-border">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={onClose}
-              className="h-9 px-4 text-sm bg-secondary text-secondary-foreground border-border hover:bg-accent"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              size="sm"
-              disabled={joinCode.trim().length !== 6 || isJoining || success}
-              className="h-9 px-4 text-sm bg-primary text-primary-foreground hover:opacity-90 font-semibold disabled:opacity-50"
-            >
-              {isJoining ? (
-                <Loader2 className="w-4 h-4 animate-spin mr-2" />
-              ) : (
-                <UserPlus className="w-4 h-4 mr-2" />
-              )}
-              {success ? "Requested" : "Request to Join"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function CreateProjectDialog({
-  isOpen,
-  onClose,
-}: {
-  isOpen: boolean;
-  onClose: () => void;
-}) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [githubUrl, setGithubUrl] = useState("");
-  const [discordGuildId, setDiscordGuildId] = useState("");
-  const [maxMembers, setMaxMembers] = useState(10);
-  const [isCreating, setIsCreating] = useState(false);
-  const { createProject } = useProjectStore();
-
-  const handleCreate = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!name.trim()) return;
-    setIsCreating(true);
-    try {
-      await createProject({
-        name: name.trim(),
-        description: description.trim(),
-        github_repo_url: githubUrl.trim(),
-        discord_guild_id: discordGuildId.trim(),
-        max_members: Number(maxMembers),
-      });
-      setName("");
-      setDescription("");
-      setGithubUrl("");
-      setDiscordGuildId("");
-      setMaxMembers(10);
-      onClose();
-    } catch (err) {
-      console.error("Failed to create project:", err);
-    } finally {
-      setIsCreating(false);
-    }
-  };
-
-  return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-lg bg-card border-border text-foreground">
-        <DialogHeader>
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-lg bg-accent flex items-center justify-center text-foreground">
-              <Plus className="w-5 h-5" strokeWidth={2.5} />
-            </div>
-            <div>
-              <DialogTitle className="text-lg font-bold text-foreground">Create New Project</DialogTitle>
-              <DialogDescription className="text-sm text-muted-foreground mt-0.5">
-                Connect GitHub & Discord to initialize persistent AI project memory.
-              </DialogDescription>
-            </div>
-          </div>
-        </DialogHeader>
-
-        <form onSubmit={handleCreate} className="space-y-4 py-2">
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium text-muted-foreground">
-              Project Name <span className="text-foreground">*</span>
-            </label>
-            <Input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. backend_service"
-              className="h-9.5 text-sm bg-background border-border focus-visible:ring-ring text-foreground placeholder:text-muted-foreground/60"
-              required
-              autoFocus
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium text-muted-foreground">Description</label>
-            <Input
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Brief summary of your project goals"
-              className="h-9.5 text-sm bg-background border-border focus-visible:ring-ring text-foreground placeholder:text-muted-foreground/60"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium text-muted-foreground">GitHub Repository URL</label>
-            <Input
-              type="text"
-              value={githubUrl}
-              onChange={(e) => setGithubUrl(e.target.value)}
-              placeholder="https://github.com/owner/repository"
-              className="h-9.5 text-sm font-mono bg-background border-border focus-visible:ring-ring text-foreground placeholder:text-muted-foreground/60"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-muted-foreground flex items-center justify-between">
-                <span>Discord Server ID</span>
-                <span className="text-xs text-muted-foreground">Optional</span>
-              </label>
-              <Input
-                type="text"
-                value={discordGuildId}
-                onChange={(e) => setDiscordGuildId(e.target.value)}
-                placeholder="1234567890..."
-                className="h-9.5 text-sm font-mono bg-background border-border focus-visible:ring-ring text-foreground placeholder:text-muted-foreground/60"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-muted-foreground">Max Team Members</label>
-              <Input
-                type="number"
-                min={1}
-                max={100}
-                value={maxMembers}
-                onChange={(e) => setMaxMembers(Math.max(1, Number(e.target.value)))}
-                className="h-9.5 text-sm bg-background border-border focus-visible:ring-ring text-foreground"
-              />
-            </div>
-          </div>
-
-          <DialogFooter className="gap-2 sm:gap-0 pt-3 border-t border-border">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={onClose}
-              className="h-9 px-4 text-sm bg-secondary text-secondary-foreground border-border hover:bg-accent"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              size="sm"
-              disabled={!name.trim() || isCreating}
-              className="h-9 px-4 text-sm bg-primary text-primary-foreground hover:opacity-90 font-semibold disabled:opacity-50"
-            >
-              {isCreating ? (
-                <Loader2 className="w-4 h-4 animate-spin mr-2" />
-              ) : (
-                <Plus className="w-4 h-4 mr-2" />
-              )}
-              Create Project
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 export default function DashboardPage() {
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [joinDialogOpen, setJoinDialogOpen] = useState(false);
   const [pendingExpanded, setPendingExpanded] = useState(false);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [pendingProjects, setPendingProjects] = useState<Project[]>([]);
   const [isLoadingActivity, setIsLoadingActivity] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const { user } = useAuthStore();
-  const { projects, isLoading, fetchProjects, deleteProject } = useProjectStore();
+  const { projects, isLoading, fetchProjects, deleteProject, openCreateDialog, openJoinDialog } = useProjectStore();
   const router = useRouter();
 
-  const fetchPendingRequests = async () => {
+  const fetchPendingRequests = useCallback(async () => {
     try {
       const pending = await api.get<Project[]>("/projects/join/pending");
       setPendingProjects(pending || []);
     } catch {
       setPendingProjects([]);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (user) {
       fetchProjects();
-      fetchPendingRequests();
+      api.get<Project[]>("/projects/join/pending")
+        .then((pending) => setPendingProjects(pending || []))
+        .catch(() => setPendingProjects([]));
     }
   }, [user, fetchProjects]);
 
   useEffect(() => {
-    setIsLoadingActivity(true);
     api.get<ActivityItem[]>("/projects/activity/all")
       .then((data) => setActivities(data || []))
       .catch((err) => {
@@ -440,7 +182,7 @@ export default function DashboardPage() {
         {/* Action Controls */}
         <div className="flex items-center gap-2.5 flex-wrap">
           <Button
-            onClick={() => setJoinDialogOpen(true)}
+            onClick={openJoinDialog}
             variant="outline"
             size="sm"
             className="h-9 px-4 text-xs sm:text-sm bg-secondary text-secondary-foreground border-border hover:bg-accent font-medium cursor-pointer shadow-2xs"
@@ -450,7 +192,7 @@ export default function DashboardPage() {
           </Button>
 
           <Button
-            onClick={() => setDialogOpen(true)}
+            onClick={openCreateDialog}
             size="sm"
             className="h-9 px-4 text-xs sm:text-sm bg-primary text-primary-foreground hover:opacity-90 font-semibold shadow-xs cursor-pointer"
           >
@@ -460,7 +202,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* 2. Pending Join Requests Collapsible Banner (only rendered when there are pending requests) */}
+      {/* 2. Pending Join Requests Collapsible Banner */}
       {pendingProjects.length > 0 && (
         <div className="rounded-xl border border-border bg-card text-foreground overflow-hidden transition-all shadow-2xs">
           <button
@@ -805,7 +547,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* 5. Projects Section (Optimized Density Data Table) */}
+      {/* 5. Projects Section (Data Table) */}
       <Card className="bg-card border-border text-foreground overflow-hidden shadow-2xs">
         <CardHeader className="p-5 border-b border-border flex-row items-center justify-between space-y-0 gap-3 flex-wrap">
           <div className="space-y-1">
@@ -864,7 +606,7 @@ export default function DashboardPage() {
               ) : (
                 <Button
                   size="sm"
-                  onClick={() => setDialogOpen(true)}
+                  onClick={openCreateDialog}
                   className="h-8 px-3 text-xs bg-primary text-primary-foreground hover:opacity-90 font-semibold"
                 >
                   <Plus className="w-3.5 h-3.5 mr-1" />
@@ -873,7 +615,7 @@ export default function DashboardPage() {
               )}
             </div>
           ) : (
-                      <div className="overflow-x-auto">
+            <div className="overflow-x-auto">
               <table className="w-full text-left text-xs sm:text-sm">
                 <thead>
                   <tr className="border-b border-border text-muted-foreground bg-background uppercase tracking-wider font-semibold text-xs">
@@ -1157,23 +899,9 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Dialog Modals */}
-      <CreateProjectDialog
-        isOpen={dialogOpen}
-        onClose={() => {
-          setDialogOpen(false);
-          fetchProjects();
-          fetchPendingRequests();
-        }}
-      />
-      <JoinProjectDialog
-        isOpen={joinDialogOpen}
-        onClose={() => {
-          setJoinDialogOpen(false);
-          fetchProjects();
-          fetchPendingRequests();
-        }}
-      />
+      {/* Global Dialog Modals */}
+      <CreateProjectDialog />
+      <JoinProjectDialog />
     </div>
   );
 }

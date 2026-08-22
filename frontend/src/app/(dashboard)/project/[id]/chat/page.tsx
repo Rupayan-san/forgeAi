@@ -1,108 +1,195 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
   Send,
   Loader2,
   ChevronDown,
-  User,
-  Sparkles,
+  Bot,
+  Wifi,
+  WifiOff,
+  ScrollText,
+  Users,
   ArrowLeft,
+  Sparkles,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import { getSourceConfig, summarizeSourceTypes } from "@/lib/sourceTypes";
 import { useAuthStore } from "@/store/use-auth-store";
-import { AIThinkingBlock } from "@/components/chat/ai-thinking-block";
+import { useProjectStore } from "@/store/use-project-store";
+import { ChatMessage, SourceCitation } from "@/types";
 
-interface SourceCitation {
-  source_type: string;
-  source_id: string;
-  source_url?: string;
-  relevance_score: number;
-  content_preview: string;
-}
-
-interface ChatMessage {
-  message_id: string;
-  content: string;
-  sources: SourceCitation[];
-  created_at: string;
-  role: "user" | "assistant";
-  trace?: string[];
-}
-
-const suggestedQueries = [
-  "What's the difference between let and const in JavaScript?",
-  "Why did we choose this architecture?",
-  "What decisions were made in the last sprint?",
-  "Summarize recent PR discussions",
-];
-
-function formatMessageTime(isoString?: string): string {
-  if (!isoString) {
-    return new Date().toLocaleTimeString([], {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
-  }
+function formatRelativeTime(isoString: string): string {
+  if (!isoString) return "Just now";
   try {
-    let s = String(isoString).trim();
-    if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)) s += "Z";
-    const d = new Date(s);
-    if (isNaN(d.getTime())) return "";
-    return d.toLocaleTimeString([], {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return "Recently";
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   } catch {
-    return "";
+    return "Recently";
   }
 }
 
-export default function ChatPage() {
+export default function UnifiedChatPage() {
   const params = useParams();
   const projectId = params.id as string;
-  const { user } = useAuthStore();
+  const { user, token } = useAuthStore();
+  const { currentProject, fetchProject } = useProjectStore();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [isSending, setIsSending] = useState(false);
   const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set());
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [connectionStatus, setConnectionStatus] = useState<"connected" | "connecting" | "reconnecting" | "disconnected">("connecting");
+  const [aiThinking, setAiThinking] = useState<{ active: boolean; aiName: string } | null>(null);
+  const [onlineCount, setOnlineCount] = useState(1);
 
-  // Load chat history
+  const socketRef = useRef<WebSocket | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const aiName = currentProject?.ai_config?.name || "Forge";
+  const aiInvocation = currentProject?.ai_config?.invocation_phrase || aiName;
+
   useEffect(() => {
-    const loadHistory = async () => {
+    if (projectId) {
+      fetchProject(projectId, true);
+      api
+        .get<ChatMessage[]>(`/projects/${projectId}/chat/messages?limit=60`)
+        .then((data) => setMessages(data || []))
+        .catch((err) => console.error("Failed to load chat history:", err))
+        .finally(() => setIsLoadingHistory(false));
+    }
+  }, [projectId, fetchProject]);
+
+  const connectWebSocketRef = useRef<() => void>(() => {});
+
+  // WebSocket Connection
+  const connectWebSocket = useCallback(() => {
+    let activeToken = token;
+    if (!activeToken && typeof window !== "undefined") {
       try {
-        const history = await api.get<ChatMessage[]>(
-          `/projects/${projectId}/chat/history`
-        );
-        const tagged = (history || []).map((msg, i) => ({
-          ...msg,
-          role: (msg.role || (i % 2 === 0 ? "user" : "assistant")) as "user" | "assistant",
-          sources: msg.sources || [],
-        }));
-        setMessages(tagged);
-      } catch (err) {
-        console.error("Failed to load chat history", err);
-      } finally {
-        setIsLoadingHistory(false);
+        const raw = localStorage.getItem("forge-auth");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          activeToken = parsed?.state?.token;
+        }
+        if (!activeToken) {
+          activeToken = localStorage.getItem("token");
+        }
+      } catch {}
+    }
+    if (!activeToken) {
+      activeToken = api.getToken();
+    }
+
+    if (!projectId || !activeToken) {
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = setTimeout(() => {
+        connectWebSocketRef.current();
+      }, 1000);
+      return;
+    }
+
+    if (socketRef.current) {
+      try {
+        socketRef.current.close();
+      } catch {}
+      socketRef.current = null;
+    }
+
+    // Build WS URL matching exact host - prefer 127.0.0.1 on local dev for IPv4 stability
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    let wsHost = "127.0.0.1:8000";
+    if (process.env.NEXT_PUBLIC_BACKEND_URL) {
+      wsHost = process.env.NEXT_PUBLIC_BACKEND_URL.replace(/^http(s)?:\/\//, "").replace(/\/api\/v1\/?$/, "");
+    } else if (typeof window !== "undefined") {
+      const hostname = window.location.hostname;
+      wsHost = hostname === "localhost" ? "127.0.0.1:8000" : `${hostname}:8000`;
+    }
+
+    const wsUrl = `${protocol}//${wsHost}/api/v1/projects/${projectId}/ws?token=${activeToken}`;
+    
+    try {
+      const ws = new WebSocket(wsUrl);
+      socketRef.current = ws;
+
+      ws.onopen = () => {
+        setConnectionStatus("connected");
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = null;
+        }
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === "message" && payload.data) {
+            const newMsg: ChatMessage = payload.data;
+            setMessages((prev) => {
+              if (prev.some((m) => m.message_id === newMsg.message_id || (newMsg.id && m.id === newMsg.id))) {
+                return prev;
+              }
+              return [...prev, newMsg];
+            });
+            if (newMsg.role === "assistant" || newMsg.is_ai_generated) {
+              setAiThinking(null);
+            }
+          } else if (payload.type === "ai_thinking") {
+            setAiThinking({ active: true, aiName: payload.ai_name || "Forge" });
+          } else if (payload.type === "presence") {
+            if (payload.online_count) {
+              setOnlineCount(payload.online_count);
+            }
+          }
+        } catch (e) {
+          console.warn("Failed to parse WS message:", e);
+        }
+      };
+
+      ws.onclose = () => {
+        setConnectionStatus("disconnected");
+        socketRef.current = null;
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+        }
+        reconnectTimeoutRef.current = setTimeout(() => {
+          setConnectionStatus("reconnecting");
+          connectWebSocketRef.current();
+        }, 3000);
+      };
+
+      ws.onerror = () => {
+        console.warn("[UnifiedChat] WebSocket connection interrupted, reconnecting...");
+      };
+    } catch (err) {
+      console.warn("[UnifiedChat] Error initializing WebSocket:", err);
+    }
+  }, [projectId, token]);
+
+  useEffect(() => {
+    connectWebSocketRef.current = connectWebSocket;
+  }, [connectWebSocket]);
+
+  useEffect(() => {
+    connectWebSocket();
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.close();
+      }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
       }
     };
-    if (projectId) {
-      loadHistory();
-    }
-  }, [projectId]);
+  }, [connectWebSocket]);
 
-  // Auto-scroll to bottom
+  // Scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading]);
+  }, [messages, aiThinking]);
 
   const toggleSources = (messageId: string) => {
     setExpandedSources((prev) => {
@@ -116,56 +203,49 @@ export default function ChatPage() {
     });
   };
 
-  const handleSend = async (textToSend?: string) => {
-    const query = (textToSend || input).trim();
-    if (!query || isLoading) return;
+  const handleSend = async (textOverride?: string) => {
+    const messageText = (textOverride || input).trim();
+    if (!messageText || isSending) return;
 
-    const userMessage: ChatMessage = {
-      message_id: crypto.randomUUID(),
-      content: query,
-      sources: [],
-      created_at: new Date().toISOString(),
-      role: "user",
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
+    setIsSending(true);
     setInput("");
-    setIsLoading(true);
 
-    try {
-      const response = await api.post<{
-        message_id: string;
-        content: string;
-        sources: SourceCitation[];
-        created_at: string;
-        trace?: string[];
-      }>(`/projects/${projectId}/chat`, {
-        message: userMessage.content,
-        interface_type: "text",
-      });
+    const isAiInvoked = /@|forge|ai|bot|assistant/i.test(messageText);
+    if (isAiInvoked) {
+      setAiThinking({ active: true, aiName });
+    }
 
-      const assistantMessage: ChatMessage = {
-        ...response,
-        role: "assistant",
-        sources: response.sources || [],
-        trace: response.trace || [],
-      };
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ content: messageText }));
+      setIsSending(false);
+    } else {
+      try {
+        const sentMsg = await api.post<ChatMessage>(`/projects/${projectId}/chat/messages`, {
+          content: messageText,
+        });
+        setMessages((prev) => {
+          if (prev.some((m) => m.message_id === sentMsg.message_id)) return prev;
+          return [...prev, sentMsg];
+        });
 
-      setMessages((prev) => [...prev, assistantMessage]);
-    } catch (err) {
-      console.error("Chat error", err);
-      setMessages((prev) => [
-        ...prev,
-        {
-          message_id: crypto.randomUUID(),
-          content: "Sorry, I encountered an error while searching project memory. Please try again.",
-          sources: [],
-          created_at: new Date().toISOString(),
-          role: "assistant",
-        },
-      ]);
-    } finally {
-      setIsLoading(false);
+        // Fast poll for AI response if invoked
+        if (isAiInvoked) {
+          setTimeout(async () => {
+            try {
+              const freshMsgs = await api.get<ChatMessage[]>(`/projects/${projectId}/chat/messages?limit=10`);
+              if (freshMsgs && freshMsgs.length > 0) {
+                setMessages(freshMsgs);
+                setAiThinking(null);
+              }
+            } catch {}
+          }, 1200);
+        }
+      } catch (err) {
+        console.error("Failed to send message via REST fallback:", err);
+        setAiThinking(null);
+      } finally {
+        setIsSending(false);
+      }
     }
   };
 
@@ -176,6 +256,12 @@ export default function ChatPage() {
     }
   };
 
+  const suggestedQueries = [
+    `@${aiInvocation} what is our Project Constitution stack?`,
+    `@${aiInvocation} what are our Git branch and commit rules?`,
+    `@${aiInvocation} explain our service architecture rules`,
+  ];
+
   return (
     <div className="flex flex-col h-[calc(100vh-56px)] max-h-[calc(100vh-56px)] overflow-hidden bg-background text-foreground transition-colors duration-200">
       {/* Header */}
@@ -183,58 +269,85 @@ export default function ChatPage() {
         <div className="flex items-center gap-3">
           <Link
             href={`/project/${projectId}`}
-            className="p-1.5 rounded-sm bg-card hover:bg-accent border border-border text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0 shadow-2xs"
+            className="p-1.5 rounded-md bg-card hover:bg-accent border border-border text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0 shadow-xs"
             title="Back to Project"
             aria-label="Back to Project"
           >
             <ArrowLeft className="w-4 h-4" />
           </Link>
-          <div className="w-8 h-8 rounded-sm bg-card border border-border flex items-center justify-center font-mono font-bold text-xs text-foreground shadow-2xs">
-            AI
-          </div>
           <div>
-            <h1 className="text-sm sm:text-base font-bold font-mono text-foreground">
-              Project AI Assistant
-            </h1>
-            <p className="text-xs text-muted-foreground font-mono mt-0.5">
-              Knowledge Q&A grounded with source citations
+            <div className="flex items-center gap-2">
+              <h1 className="text-sm sm:text-base font-bold text-foreground truncate">
+                {currentProject?.name || "Project"} — Unified Chat
+              </h1>
+              <span className="flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-mono bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                <Bot className="w-3 h-3" />
+                @{aiInvocation}
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Team collaboration with embedded Project Memory & Constitution grounding
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-background border border-border text-muted-foreground text-xs font-mono font-medium">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            RAG Memory Active
-          </span>
+
+        <div className="flex items-center gap-2 sm:gap-3">
+          <Link
+            href={`/project/${projectId}/constitution`}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs text-muted-foreground hover:text-foreground bg-secondary border border-border transition-colors font-medium"
+          >
+            <ScrollText className="w-3.5 h-3.5 text-emerald-500" />
+            <span className="hidden sm:inline">Constitution</span>
+          </Link>
+
+          {/* Connection Status Badge */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono bg-background border border-border">
+            {connectionStatus === "connected" ? (
+              <>
+                <Wifi className="w-3 h-3 text-emerald-500" />
+                <span className="text-emerald-600 dark:text-emerald-500 font-semibold">Live ({onlineCount})</span>
+              </>
+            ) : connectionStatus === "reconnecting" ? (
+              <>
+                <Loader2 className="w-3 h-3 text-amber-500 animate-spin" />
+                <span className="text-amber-500">Reconnecting</span>
+              </>
+            ) : (
+              <>
+                <WifiOff className="w-3 h-3 text-muted-foreground" />
+                <span className="text-muted-foreground">Offline</span>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Messages Feed */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 py-6">
-        <div className="max-w-3xl mx-auto space-y-6">
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
+        <div className="max-w-3xl mx-auto space-y-4">
           {isLoadingHistory ? (
             <div className="flex items-center justify-center py-20">
               <Loader2 className="w-5 h-5 text-emerald-500 animate-spin" strokeWidth={2} />
             </div>
           ) : messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
-              <div className="w-10 h-10 rounded-sm bg-card border border-border flex items-center justify-center mb-3 font-mono font-bold text-sm text-foreground shadow-2xs">
-                AI
+              <div className="w-12 h-12 rounded-xl bg-card border border-border flex items-center justify-center mb-3 text-emerald-500 shadow-xs">
+                <Users className="w-6 h-6" strokeWidth={1.5} />
               </div>
-              <h2 className="text-sm sm:text-base font-bold font-mono text-foreground mb-1">
-                Ask anything about your codebase & workspace
+              <h2 className="text-base font-bold text-foreground mb-1">
+                Welcome to #{currentProject?.name || "Project"} Chat
               </h2>
-              <p className="text-muted-foreground text-xs font-mono max-w-sm mb-6">
-                Queries are grounded with vector search across code, commits, discussions, and decisions.
+              <p className="text-muted-foreground text-xs sm:text-sm max-w-md mb-6">
+                Send messages to your teammates, or type <strong className="text-emerald-600 dark:text-emerald-400 font-mono">@{aiInvocation}</strong> to
+                consult the AI assistant with Project Constitution rules and vector memory.
               </p>
 
-              {/* Suggested queries */}
               <div className="flex flex-wrap gap-2 justify-center max-w-lg">
-                {suggestedQueries.map((q) => (
+                {suggestedQueries.map((q, i) => (
                   <button
-                    key={q}
+                    key={i}
                     onClick={() => handleSend(q)}
-                    className="px-3 py-1.5 rounded-sm border border-border bg-card text-xs font-mono text-muted-foreground hover:text-foreground hover:border-zinc-400 dark:hover:border-zinc-700 transition-colors cursor-pointer shadow-2xs text-left"
+                    className="px-3 py-1.5 rounded-md border border-border bg-card text-xs font-mono text-muted-foreground hover:text-foreground hover:border-zinc-400 dark:hover:border-zinc-700 transition-colors cursor-pointer shadow-xs"
                   >
                     {q}
                   </button>
@@ -243,164 +356,120 @@ export default function ChatPage() {
             </div>
           ) : (
             messages.map((msg) => {
-              const isUser = msg.role === "user";
+              const isAssistant = msg.role === "assistant" || msg.is_ai_generated;
+              const isMine = msg.user_id === user?.user_id;
 
-              if (isUser) {
-                return (
-                  /* User Message Block */
-                  <div key={msg.message_id} className="flex items-start justify-end gap-3.5 my-4">
-                    <div className="bg-white dark:bg-white text-black rounded-sm p-4 sm:p-5 max-w-[85%] sm:max-w-[75%] shadow-md border border-zinc-200">
-                      <p className="font-mono text-xs sm:text-sm leading-relaxed whitespace-pre-wrap font-normal text-black">
-                        {msg.content}
-                      </p>
-                      <div className="mt-3 text-[11px] font-mono text-zinc-500 font-medium">
-                        {formatMessageTime(msg.created_at)}
-                      </div>
-                    </div>
-
-                    {/* User Avatar Box */}
-                    <div className="w-8 h-8 rounded-sm bg-card border border-border flex items-center justify-center shrink-0 mt-0.5 shadow-2xs overflow-hidden">
-                      {user?.avatar_url ? (
-                        <img
-                          src={user.avatar_url}
-                          alt={user.github_username || user.name || "User"}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : user?.github_username ? (
-                        <span className="text-[11px] font-mono font-bold text-foreground">
-                          {user.github_username.substring(0, 2).toUpperCase()}
-                        </span>
-                      ) : (
-                        <User className="w-4 h-4 text-foreground" strokeWidth={1.5} />
-                      )}
-                    </div>
-                  </div>
-                );
-              }
-
-              /* Assistant Message Block */
               return (
-                <div key={msg.message_id} className="flex items-start gap-3.5 my-5">
-                  {/* AI Avatar Box */}
-                  <div className="w-8 h-8 rounded-sm bg-card border border-border flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">
-                    <span className="font-mono font-bold text-xs text-foreground tracking-tight">
-                      AI
-                    </span>
-                  </div>
+                <div
+                  key={msg.message_id || msg.id}
+                  className={`flex gap-3 ${isMine && !isAssistant ? "justify-end" : "justify-start"}`}
+                >
+                  {/* Assistant Avatar */}
+                  {isAssistant && (
+                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center shrink-0 mt-0.5 text-emerald-500 shadow-xs">
+                      <Bot className="w-4 h-4" />
+                    </div>
+                  )}
 
-                  <div className="flex-1 min-w-0 max-w-[90%] font-mono">
-                    <div className="text-xs sm:text-sm text-foreground leading-relaxed whitespace-pre-wrap font-normal space-y-2">
-                      {msg.content}
+                  {/* Message Bubble Container */}
+                  <div
+                    className={`max-w-[85%] sm:max-w-[75%] ${
+                      isAssistant
+                        ? "p-4 rounded-xl bg-card border border-emerald-500/20 text-foreground shadow-xs"
+                        : isMine
+                          ? "p-3.5 rounded-xl bg-primary text-primary-foreground font-medium shadow-xs"
+                          : "p-3.5 rounded-xl bg-card border border-border text-foreground shadow-xs"
+                    }`}
+                  >
+                    {/* Header: Sender Name & Timestamp */}
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span
+                        className={`text-xs font-bold ${
+                          isAssistant ? "text-emerald-600 dark:text-emerald-400" : isMine ? "text-primary-foreground font-semibold" : "text-foreground"
+                        }`}
+                      >
+                        {isAssistant ? `${aiName} (AI Assistant)` : msg.user_name || msg.user_id}
+                      </span>
+                      {msg.is_ai_invocation && !isAssistant && (
+                        <span className="text-[10px] bg-emerald-500/10 text-emerald-500 px-1 py-0.25 rounded font-mono">
+                          AI Mention
+                        </span>
+                      )}
+                      <span className={`text-[10px] font-mono ${isMine ? "opacity-75" : "text-muted-foreground"}`}>
+                        {formatRelativeTime(msg.created_at)}
+                      </span>
                     </div>
 
-                    {/* Timestamp */}
-                    <div className="mt-2.5 text-[11px] font-mono text-muted-foreground font-medium">
-                      {formatMessageTime(msg.created_at)}
-                    </div>
+                    {/* Content */}
+                    <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
 
-                    {/* Sources Citations */}
-                    {msg.sources && msg.sources.length > 0 && (() => {
-                      const uniqueTypes = summarizeSourceTypes(msg.sources.map((s) => s.source_type));
-                      const isMultiSource = uniqueTypes.length >= 2;
+                    {/* Source Citations for AI Assistant */}
+                    {isAssistant && msg.sources && msg.sources.length > 0 && (
+                      <div className="mt-3 pt-2.5 border-t border-border">
+                        <button
+                          onClick={() => toggleSources(msg.message_id)}
+                          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-emerald-500 transition-colors cursor-pointer"
+                        >
+                          <ChevronDown
+                            className={`w-3 h-3 transition-transform ${
+                              expandedSources.has(msg.message_id) ? "rotate-180" : ""
+                            }`}
+                          />
+                          <span>
+                            {msg.sources.length} cited source{msg.sources.length !== 1 ? "s" : ""} (including
+                            Constitution & Knowledge Base)
+                          </span>
+                        </button>
 
-                      return (
-                        <div className="mt-3 pt-3 border-t border-border/60">
-                          {isMultiSource && (
-                            <div className="flex items-center gap-1.5 mb-2 px-2 py-1 rounded-sm bg-emerald-500/10 border border-emerald-500/20 w-fit">
-                              <Sparkles className="w-3 h-3 text-emerald-500" strokeWidth={2} />
-                              <span className="text-[11px] text-emerald-500 font-mono font-medium">
-                                Synthesized from {uniqueTypes.join(" + ")}
-                              </span>
-                            </div>
-                          )}
-
-                          <button
-                            onClick={() => toggleSources(msg.message_id)}
-                            className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-emerald-500 transition-colors cursor-pointer"
-                          >
-                            <ChevronDown
-                              className={`w-3 h-3 transition-transform ${
-                                expandedSources.has(msg.message_id) ? "rotate-180" : ""
-                              }`}
-                              strokeWidth={1.5}
-                            />
-                            <span>
-                              {msg.sources.length} source{msg.sources.length !== 1 ? "s" : ""} cited
-                              {isMultiSource ? ` across ${uniqueTypes.length} types` : ""}
-                            </span>
-                          </button>
-
-                          {expandedSources.has(msg.message_id) && (
-                            <div className="mt-2 space-y-2">
-                              {msg.sources.map((source, i) => {
-                                const config = getSourceConfig(source.source_type);
-                                const Icon = config.icon;
-                                return (
-                                  <div
-                                    key={i}
-                                    className="p-2.5 rounded-sm bg-card border border-border text-xs flex items-start gap-2.5 font-mono shadow-2xs"
-                                  >
-                                    <div
-                                      className="w-5 h-5 rounded flex items-center justify-center shrink-0 mt-0.5"
-                                      style={{ background: `${config.color}15` }}
-                                    >
-                                      <Icon className="w-3 h-3" style={{ color: config.color }} strokeWidth={1.5} />
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="flex items-center justify-between gap-2">
-                                        <span
-                                          className="text-[10px] font-medium px-1.5 py-0.5 rounded"
-                                          style={{ background: `${config.color}15`, color: config.color }}
-                                        >
-                                          {config.label}
-                                        </span>
-                                        <span className="text-[10px] text-muted-foreground font-mono shrink-0">
-                                          {Math.round(source.relevance_score * 100)}% match
-                                        </span>
-                                      </div>
-                                      <span className="text-foreground font-mono text-[11px] font-medium truncate block mt-1">
-                                        {source.source_id}
-                                      </span>
-                                      <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5 leading-relaxed">
-                                        {source.content_preview}
-                                      </p>
-                                      {source.source_url && (
-                                        <a
-                                          href={source.source_url}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="text-[10px] text-emerald-500 hover:underline mt-1 inline-block"
-                                        >
-                                          View source →
-                                        </a>
-                                      )}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
+                        {expandedSources.has(msg.message_id) && (
+                          <div className="mt-2 space-y-2">
+                            {msg.sources.map((src: SourceCitation, i: number) => (
+                              <div
+                                key={i}
+                                className="p-2.5 rounded-lg bg-background border border-border text-xs space-y-1 font-mono"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className="font-mono text-emerald-600 dark:text-emerald-400 font-medium">
+                                    [{src.source_type.toUpperCase()}] {src.source_id}
+                                  </span>
+                                  <span className="text-[10px] text-muted-foreground font-mono">
+                                    {Math.round(src.relevance_score * 100)}% match
+                                  </span>
+                                </div>
+                                {src.content_preview && (
+                                  <p className="text-muted-foreground line-clamp-2">{src.content_preview}</p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
+
+                  {/* Human User Avatar */}
+                  {!isAssistant && !isMine && (
+                    <div className="w-7 h-7 rounded-full bg-accent border border-border flex items-center justify-center shrink-0 mt-0.5 text-[10px] text-foreground font-bold">
+                      {(msg.user_name || "??").substring(0, 2).toUpperCase()}
+                    </div>
+                  )}
                 </div>
               );
             })
           )}
 
-          {/* AI Thinking Block while loading */}
-          {isLoading && (
-            <div className="flex items-start gap-3.5 my-5">
-              <div className="w-8 h-8 rounded-sm bg-card border border-border flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">
-                <span className="font-mono font-bold text-xs text-foreground tracking-tight">
-                  AI
-                </span>
+          {/* AI Thinking State */}
+          {aiThinking?.active && (
+            <div className="flex items-start gap-3 p-3.5 rounded-xl bg-card border border-emerald-500/20 max-w-[85%] shadow-xs">
+              <div className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-500 flex items-center justify-center shrink-0">
+                <Bot className="w-4 h-4 animate-pulse" />
               </div>
-              <div className="flex-1 max-w-[88%]">
-                <AIThinkingBlock
-                  query={messages.filter((m) => m.role === "user").slice(-1)[0]?.content}
-                />
+              <div>
+                <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">{aiThinking.aiName}</span>
+                <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5">
+                  <Loader2 className="w-3 h-3 animate-spin text-emerald-500" />
+                  Reviewing Project Constitution rules & memory...
+                </p>
               </div>
             </div>
           )}
@@ -409,35 +478,94 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {/* Input Form */}
-      <div className="shrink-0 px-4 sm:px-6 py-4 border-t border-border bg-background">
-        <div className="max-w-3xl mx-auto">
-          <div className="flex items-center gap-2 bg-card border border-border rounded-lg px-4 py-2.5 shadow-2xs focus-within:border-ring transition-colors">
+      {/* Input Composer */}
+      <div className="shrink-0 px-4 sm:px-6 py-3 border-t border-border bg-background">
+        <div className="max-w-3xl mx-auto space-y-2">
+          {/* Quick Suggestions Chips */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
+            <span className="text-[11px] text-muted-foreground shrink-0 font-medium mr-1">Ask {aiName}:</span>
+            <button
+              type="button"
+              onClick={() => {
+                const prefix = `@${aiInvocation} `;
+                if (!input.startsWith(prefix)) {
+                  setInput(prefix + input);
+                }
+              }}
+              className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-xs font-mono font-medium shrink-0 cursor-pointer flex items-center gap-1 transition-colors"
+            >
+              <Bot className="w-3 h-3" />
+              @{aiInvocation}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSend(`@${aiInvocation} summarize our active stack & decisions`)}
+              className="px-2.5 py-0.5 rounded-full bg-card hover:bg-accent text-muted-foreground hover:text-foreground border border-border text-[11px] shrink-0 cursor-pointer transition-colors"
+            >
+              Summarize stack & decisions
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSend(`@${aiInvocation} what are our project conventions?`)}
+              className="px-2.5 py-0.5 rounded-full bg-card hover:bg-accent text-muted-foreground hover:text-foreground border border-border text-[11px] shrink-0 cursor-pointer transition-colors"
+            >
+              Project conventions
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 rounded-xl p-2 bg-card border border-border shadow-xs focus-within:border-ring transition-colors">
+            <button
+              type="button"
+              onClick={() => {
+                const tag = `@${aiInvocation} `;
+                if (input.includes(tag)) {
+                  setInput(input.replace(tag, ""));
+                } else {
+                  setInput(tag + input);
+                }
+              }}
+              title={`Toggle @${aiInvocation}`}
+              className={`p-1.5 rounded-lg border text-xs font-mono font-semibold flex items-center gap-1 transition-colors cursor-pointer shrink-0 ${
+                input.includes(`@${aiInvocation}`)
+                  ? "bg-emerald-500 text-white border-emerald-500"
+                  : "bg-background text-muted-foreground hover:text-foreground border-border hover:bg-accent"
+              }`}
+            >
+              <Bot className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">@{aiInvocation}</span>
+            </button>
+
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask a question about your project..."
-              className="flex-1 bg-transparent border-none outline-none font-mono text-xs sm:text-sm text-foreground placeholder:text-muted-foreground"
-              disabled={isLoading}
+              placeholder={`Message team, or type @${aiInvocation} to ask AI copilot...`}
+              className="flex-1 bg-transparent border-none outline-none text-xs sm:text-sm text-foreground placeholder:text-muted-foreground px-1"
+              disabled={isSending}
             />
             <button
               onClick={() => handleSend()}
-              disabled={!input.trim() || isLoading}
-              className="px-3.5 py-1.5 rounded-md bg-foreground text-background hover:opacity-90 font-mono text-xs font-semibold transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5 shrink-0"
+              disabled={!input.trim() || isSending}
+              className="px-3.5 py-1.5 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1 text-xs font-semibold shrink-0 shadow-xs"
             >
-              {isLoading ? (
+              {isSending ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
               ) : (
-                <Send className="w-3.5 h-3.5" />
+                <>
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Send</span>
+                </>
               )}
-              <span className="hidden sm:inline">Ask AI</span>
             </button>
           </div>
-          <p className="text-[11px] font-mono text-muted-foreground mt-2 text-center">
-            Forge AI grounding: Vector search across code, commits, decisions, & chat history.
-          </p>
+          <div className="flex items-center justify-between text-[11px] text-muted-foreground px-1">
+            <span className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+              Forge AI connected & grounded in Project Memory
+            </span>
+            <span>{connectionStatus === "connected" ? "Realtime Active" : "Reconnecting..."}</span>
+          </div>
         </div>
       </div>
     </div>

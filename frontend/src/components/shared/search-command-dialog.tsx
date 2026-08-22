@@ -36,7 +36,7 @@ interface SearchResultItem {
 export function SearchCommandDialog() {
   const router = useRouter();
   const { isOpen, query, setIsOpen, closeSearch, setQuery } = useSearchStore();
-  const { projects, currentProject } = useProjectStore();
+  const { projects, currentProject, openCreateDialog, openJoinDialog } = useProjectStore();
   const { theme, toggleTheme } = useTheme();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -165,6 +165,26 @@ export function SearchCommandDialog() {
 
     // 3. Actions
     const actionItems = [
+      {
+        id: "action-new-project",
+        title: "Create New Project",
+        subtitle: "Initialize a new AI memory workspace with GitHub & Discord",
+        icon: <Plus className="w-4 h-4 text-emerald-500" />,
+        action: () => {
+          closeSearch();
+          openCreateDialog();
+        },
+      },
+      {
+        id: "action-join-project",
+        title: "Join Project",
+        subtitle: "Enter a 6-character code to join an existing workspace",
+        icon: <UserPlus className="w-4 h-4 text-sky-500" />,
+        action: () => {
+          closeSearch();
+          openJoinDialog();
+        },
+      },
       {
         id: "action-theme",
         title: theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode",

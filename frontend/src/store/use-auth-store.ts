@@ -4,7 +4,13 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { User, AuthState } from "@/types";
 import { api } from "@/lib/api";
-import { API_V1_URL } from "@/lib/constants";
+
+// Direct backend URL for OAuth — must bypass Next.js rewrite proxy
+// because the proxy follows 302 redirects internally instead of
+// forwarding them to the browser.
+const BACKEND_AUTH_URL = process.env.NEXT_PUBLIC_BACKEND_URL
+  ? `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/v1`
+  : "http://localhost:8000/api/v1";
 
 export const useAuthStore = create<AuthState>()(
   persist(
@@ -15,7 +21,9 @@ export const useAuthStore = create<AuthState>()(
       isLoading: false,
 
       login: () => {
-        window.location.href = `${API_V1_URL}/auth/github/login`;
+        // Navigate directly to backend (not through Next.js proxy)
+        // so the browser receives the 302 redirect to GitHub properly
+        window.location.href = `${BACKEND_AUTH_URL}/auth/github/login`;
       },
 
       setAuth: (user: User, token: string) => {
@@ -23,7 +31,10 @@ export const useAuthStore = create<AuthState>()(
         set({ user, token, isAuthenticated: true, isLoading: false });
       },
 
-      logout: () => {
+      logout: async () => {
+        // Revoke refresh token on server (clears HttpOnly cookie)
+        await api.serverLogout();
+        // Clear local state
         api.setToken(null);
         set({ user: null, token: null, isAuthenticated: false, isLoading: false });
       },
@@ -41,8 +52,19 @@ export const useAuthStore = create<AuthState>()(
         }
 
         if (!token) {
-          set({ user: null, token: null, isAuthenticated: false, isLoading: false });
-          return;
+          // No access token — try to get one via refresh cookie
+          const refreshed = await api.refreshAccessToken();
+          if (refreshed) {
+            token = api.getToken();
+            if (token) {
+              set({ token, isAuthenticated: true, isLoading: true });
+            }
+          }
+
+          if (!token) {
+            set({ user: null, token: null, isAuthenticated: false, isLoading: false });
+            return;
+          }
         }
 
         api.setToken(token);
@@ -50,10 +72,10 @@ export const useAuthStore = create<AuthState>()(
 
         try {
           const user = await api.get<User>("/auth/me");
-          set({ user, token, isAuthenticated: true, isLoading: false });
+          set({ user, token: api.getToken(), isAuthenticated: true, isLoading: false });
         } catch (err: any) {
           console.warn("Session check returned error:", err);
-          // If auth fails (401, unauthorized, invalid user), reset token and clear auth
+          // If auth fails (401, 403, 404, unauthorized, invalid user), reset token and clear auth
           if (
             err?.message?.includes("401") ||
             err?.message?.includes("403") ||
@@ -71,6 +93,7 @@ export const useAuthStore = create<AuthState>()(
             }
             set({ user: null, token: null, isAuthenticated: false, isLoading: false });
           } else {
+            // Network error or other issue — don't wipe session
             set({ isLoading: false });
           }
         }

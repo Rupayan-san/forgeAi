@@ -69,21 +69,27 @@ class QdrantService:
 
         query_filter = Filter(must=conditions) if conditions else None
 
-        results = await self.client.query_points(
-            collection_name=collection_name,
-            query=query_vector,
-            query_filter=query_filter,
-            limit=limit,
-        )
-
-        return [
-            {
-                "id": str(hit.id),
-                "score": hit.score,
-                "payload": hit.payload,
-            }
-            for hit in results.points
-        ]
+        import asyncio
+        try:
+            results = await asyncio.wait_for(
+                self.client.query_points(
+                    collection_name=collection_name,
+                    query=query_vector,
+                    query_filter=query_filter,
+                    limit=limit,
+                ),
+                timeout=0.5,
+            )
+            return [
+                {
+                    "id": str(point.id),
+                    "score": point.score,
+                    "payload": point.payload,
+                }
+                for point in results.points
+            ]
+        except Exception:
+            return []
 
     async def delete_collection(self, collection_name: str) -> None:
         """Delete an entire collection."""

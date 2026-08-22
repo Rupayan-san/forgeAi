@@ -1,6 +1,7 @@
 import json
 import math
 from datetime import datetime, timezone
+from typing import Optional
 from bson import ObjectId
 
 from openai import AsyncOpenAI
@@ -8,12 +9,16 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.config import settings
 from app.core.database import get_qdrant
-from app.services.qdrant_service import QdrantService
 from app.services.embedding_service import EmbeddingService
-from app.models.decision import DecisionModel, DecisionConflictModel
+from app.models.decision import (
+    DecisionModel,
+    DecisionConflictModel,
+    DecisionStatus,
+    ConflictInfo,
+)
 
 
-EXTRACTION_PROMPT = """Analyze the following project context (code files, commit logs, pull requests, and Discord conversations) and extract any architectural, design, or product decisions that the team has made.
+BULK_EXTRACTION_PROMPT = """Analyze the following project context (code files, commit logs, pull requests, and Discord conversations) and extract any architectural, design, or product decisions that the team has made.
 
 For each decision found, provide:
 - decision_text: A clear, concise statement of what was decided
@@ -34,8 +39,29 @@ Context:
 
 Respond with ONLY valid JSON array, no markdown formatting."""
 
+EXTRACTION_PROMPT = """Analyze the following project content (conversation, PR, commit, or document) and determine if an ARCHITECTURAL, TECHNICAL, OR PRODUCT DECISION was made.
+
+CRITERIA FOR A VALID DECISION:
+- It must represent an AGREED or COMMITTED choice (e.g. choosing a database, framework, library, naming convention, API style, architecture pattern).
+- General casual questions, brainstorming without consensus, or trivial status updates are NOT decisions (return "is_decision": false).
+
+Provide a JSON object with:
+- "is_decision": boolean
+- "decision_text": Concise statement of what was decided (e.g., "Use MongoDB for primary document persistence")
+- "reasoning": The justification or reasoning given (or empty string if not stated)
+- "alternatives_considered": Array of alternative options mentioned (e.g. ["PostgreSQL", "DynamoDB"])
+- "participants": Array of people involved in the decision
+- "confidence_score": Float between 0.0 and 1.0
+
+Context:
+{context}
+
+Respond with ONLY valid JSON."""
+
 
 class DecisionService:
+    """Service for non-destructive decision extraction, deduplication, conflict detection, and retrieval."""
+
     def __init__(self):
         self.openai = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         self.model = "gpt-4o-mini"
@@ -103,7 +129,7 @@ class DecisionService:
                 model=self.model,
                 messages=[
                     {"role": "system", "content": "You are a technical analyst that extracts architectural and product decisions from project artifacts. Always respond with valid JSON."},
-                    {"role": "user", "content": EXTRACTION_PROMPT.format(context=context)},
+                    {"role": "user", "content": BULK_EXTRACTION_PROMPT.format(context=context)},
                 ],
                 temperature=0.2,
                 max_tokens=2048,
@@ -133,6 +159,7 @@ class DecisionService:
                 source_type=d.get("source_type", "unknown"),
                 source_id=d.get("source_id", ""),
                 source_url=d.get("source_url", ""),
+                status=DecisionStatus.ACTIVE.value,
                 timestamp=datetime.now(timezone.utc),
                 extracted_at=datetime.now(timezone.utc),
                 confidence_score=d.get("confidence_score", 0.5),
@@ -144,7 +171,7 @@ class DecisionService:
 
     @staticmethod
     def _cosine_similarity(a: list[float], b: list[float]) -> float:
-        """Plain-python cosine similarity — no extra dependency needed."""
+        """Calculate cosine similarity between two vector embeddings."""
         dot = sum(x * y for x, y in zip(a, b))
         norm_a = math.sqrt(sum(x * x for x in a))
         norm_b = math.sqrt(sum(y * y for y in b))
@@ -152,33 +179,288 @@ class DecisionService:
             return 0.0
         return dot / (norm_a * norm_b)
 
+    async def extract_decision_candidate(
+        self,
+        project_id: str,
+        text: str,
+        source_type: str,
+        source_id: str,
+        source_url: str,
+        db: AsyncIOMotorDatabase,
+    ) -> Optional[DecisionModel]:
+        """Extract a single decision from a message/event and process deduplication/conflict."""
+        if not text or len(text.strip()) < 10:
+            return None
+
+        try:
+            completion = await self.openai.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a software architect analyzing project communication to extract technical decisions. Always respond with valid JSON.",
+                    },
+                    {"role": "user", "content": EXTRACTION_PROMPT.format(context=text)},
+                ],
+                temperature=0.1,
+                max_tokens=400,
+            )
+            raw = completion.choices[0].message.content.strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[1]
+                raw = raw.rsplit("```", 1)[0]
+
+            data = json.loads(raw)
+            if not data.get("is_decision") or not data.get("decision_text"):
+                return None
+
+            candidate = DecisionModel(
+                decision_id=str(ObjectId()),
+                project_id=project_id,
+                decision_text=data["decision_text"].strip(),
+                reasoning=data.get("reasoning", "").strip(),
+                alternatives_considered=data.get("alternatives_considered", []),
+                participants=data.get("participants", []),
+                source_type=source_type,
+                source_id=source_id,
+                source_url=source_url,
+                status=DecisionStatus.ACTIVE.value,
+                confidence_score=float(data.get("confidence_score", 0.8)),
+                timestamp=datetime.now(timezone.utc),
+                extracted_at=datetime.now(timezone.utc),
+            )
+
+            # Deduplication and Supersession Check against existing project decisions
+            saved_decision = await self._reconcile_and_save_decision(candidate, db)
+            return saved_decision
+
+        except Exception as e:
+            print(f"[DecisionService] Extraction error: {e}")
+            return None
+
+    async def _reconcile_and_save_decision(
+        self,
+        candidate: DecisionModel,
+        db: AsyncIOMotorDatabase,
+    ) -> DecisionModel:
+        """Compare candidate against active project decisions for duplicates, supersession, or conflicts."""
+        # Find active decisions for this project
+        cursor = db["decisions"].find({
+            "project_id": candidate.project_id,
+            "status": {"$in": [DecisionStatus.ACTIVE.value, DecisionStatus.CONFLICTED.value]},
+        })
+        existing_decisions = [DecisionModel(**doc) async for doc in cursor]
+
+        if not existing_decisions:
+            await db["decisions"].insert_one(candidate.model_dump(by_alias=True))
+            return candidate
+
+        # Fast cosine similarity pre-filtering
+        candidate_embedding = await self.embedding_service.generate_single_embedding(candidate.decision_text)
+        existing_texts = [d.decision_text for d in existing_decisions]
+        existing_embeddings = await self.embedding_service.generate_embeddings(existing_texts)
+
+        # Check for high similarity matches
+        for existing, emb in zip(existing_decisions, existing_embeddings):
+            sim = self._cosine_similarity(candidate_embedding, emb)
+            if sim >= 0.75:
+                # LLM relationship check
+                prompt = f"""Decision A (Existing): {existing.decision_text}
+Reasoning A: {existing.reasoning}
+
+Decision B (New Candidate): {candidate.decision_text}
+Reasoning B: {candidate.reasoning}
+
+Classify the relationship between Decision A and Decision B:
+- "duplicate": Both express the same decision (ignore new one)
+- "supersedes": Decision B updates/replaces Decision A
+- "conflicts": Both are current and mutually incompatible
+- "unrelated": Different topics despite similar words
+
+Respond with ONLY valid JSON: {{"relationship": "duplicate"|"supersedes"|"conflicts"|"unrelated", "explanation": "brief reasoning"}}"""
+
+                try:
+                    res = await self.openai.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": "You are a technical analyst evaluating software decision relationships. Return JSON only."},
+                            {"role": "user", "content": prompt},
+                        ],
+                        temperature=0.1,
+                        max_tokens=150,
+                    )
+                    parsed = json.loads(res.choices[0].message.content.strip().strip("`").removeprefix("json").strip())
+                    rel = parsed.get("relationship", "unrelated")
+                    explanation = parsed.get("explanation", "")
+
+                    if rel == "duplicate":
+                        print(f"[DecisionService] Ignored duplicate decision: '{candidate.decision_text}'")
+                        return existing
+
+                    elif rel == "supersedes":
+                        # Mark old decision as SUPERSEDED
+                        await db["decisions"].update_one(
+                            {"decision_id": existing.decision_id},
+                            {"$set": {
+                                "status": DecisionStatus.SUPERSEDED.value,
+                                "superseded_by": candidate.decision_id,
+                                "updated_at": datetime.now(timezone.utc),
+                            }}
+                        )
+                        candidate.supersedes = existing.decision_id
+                        candidate.status = DecisionStatus.ACTIVE.value
+                        await db["decisions"].insert_one(candidate.model_dump(by_alias=True))
+                        print(f"[DecisionService] Decision '{candidate.decision_id}' superseded '{existing.decision_id}'")
+                        return candidate
+
+                    elif rel == "conflicts":
+                        # Mark both as CONFLICTED
+                        await db["decisions"].update_one(
+                            {"decision_id": existing.decision_id},
+                            {"$set": {
+                                "status": DecisionStatus.CONFLICTED.value,
+                                "updated_at": datetime.now(timezone.utc),
+                            }}
+                        )
+                        candidate.status = DecisionStatus.CONFLICTED.value
+                        await db["decisions"].insert_one(candidate.model_dump(by_alias=True))
+
+                        conflict = DecisionConflictModel(
+                            project_id=candidate.project_id,
+                            decision_id_a=existing.decision_id,
+                            decision_id_b=candidate.decision_id,
+                            relationship="conflict",
+                            explanation=explanation,
+                        )
+                        await db["decision_conflicts"].insert_one(conflict.model_dump(by_alias=True))
+                        print(f"[DecisionService] Recorded conflict between '{existing.decision_id}' and '{candidate.decision_id}'")
+                        return candidate
+
+                except Exception as e:
+                    print(f"[DecisionService] Candidate reconciliation error: {e}")
+
+        # If unrelated to any existing decisions, insert as active
+        await db["decisions"].insert_one(candidate.model_dump(by_alias=True))
+        return candidate
+
+    async def extract_decisions(
+        self,
+        project_id: str,
+        collection_name: str,
+        db: AsyncIOMotorDatabase,
+    ) -> list[dict]:
+        """Extract decisions non-destructively from Qdrant chunks without deleting existing decisions."""
+        qdrant = get_qdrant()
+        points, _ = await qdrant.scroll(
+            collection_name=collection_name,
+            limit=40,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        if not points:
+            return []
+
+        context_parts = []
+        for point in points:
+            payload = point.payload
+            source_type = payload.get("source_type", "unknown")
+            content = payload.get("content", "")
+            if len(content.strip()) < 40:
+                continue
+
+            if source_type == "github_file":
+                label = f"[File: {payload.get('file_path', '')}]"
+            elif source_type == "discord_message":
+                author = payload.get("author", "unknown")
+                channel = payload.get("channel", "unknown")
+                label = f"[Discord #{channel} by {author}]"
+            elif source_type == "chat_message":
+                author = payload.get("user_name", "Team")
+                label = f"[Project Chat by {author}]"
+            else:
+                label = f"[{source_type}]"
+
+            context_parts.append(f"{label}\n{content}")
+
+        if not context_parts:
+            return []
+
+        context = "\n\n---\n\n".join(context_parts[:20])
+
+        try:
+            completion = await self.openai.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a technical analyst that extracts architectural and product decisions. Respond with ONLY valid JSON array of objects with keys: decision_text, reasoning, alternatives_considered, participants, source_type, source_id, confidence_score.",
+                    },
+                    {"role": "user", "content": f"Context:\n{context}\n\nExtract decisions JSON array:"},
+                ],
+                temperature=0.2,
+                max_tokens=2048,
+            )
+
+            raw = completion.choices[0].message.content.strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[1]
+                raw = raw.rsplit("```", 1)[0]
+
+            decisions_data = json.loads(raw)
+            if not isinstance(decisions_data, list):
+                decisions_data = []
+
+        except Exception as e:
+            print(f"[DecisionService] Batch extraction parse error: {e}")
+            return []
+
+        saved_decisions = []
+        for d in decisions_data:
+            if not d.get("decision_text"):
+                continue
+            cand = DecisionModel(
+                decision_id=str(ObjectId()),
+                project_id=project_id,
+                decision_text=d.get("decision_text", "").strip(),
+                reasoning=d.get("reasoning", "").strip(),
+                alternatives_considered=d.get("alternatives_considered", []),
+                participants=d.get("participants", []),
+                source_type=d.get("source_type", "github_file"),
+                source_id=d.get("source_id", "project_artifact"),
+                source_url="",
+                status=DecisionStatus.ACTIVE.value,
+                confidence_score=float(d.get("confidence_score", 0.8)),
+                timestamp=datetime.now(timezone.utc),
+                extracted_at=datetime.now(timezone.utc),
+            )
+            saved = await self._reconcile_and_save_decision(cand, db)
+            saved_decisions.append(saved.model_dump())
+
+        return saved_decisions
+
     async def detect_conflicts(
         self,
         project_id: str,
         db: AsyncIOMotorDatabase,
-        similarity_threshold: float = 0.80,
+        similarity_threshold: float = 0.75,
     ) -> list[dict]:
-        """Find decisions that likely conflict or supersede each other.
-
-        Step 1 (cheap): embed all decision_texts, compare pairwise with cosine
-        similarity. Only pairs above `similarity_threshold` are "candidates" —
-        this avoids an O(n^2) LLM call over every decision pair.
-        Step 2 (expensive, only for candidates): ask gpt-4o-mini to classify
-        the relationship between the two decisions.
-        """
-        cursor = db["decisions"].find({"project_id": project_id}).sort("timestamp", 1)
+        """Pairwise semantic comparison across all active project decisions for conflicts or supersessions."""
+        cursor = db["decisions"].find({
+            "project_id": project_id,
+            "status": {"$in": [DecisionStatus.ACTIVE.value, DecisionStatus.CONFLICTED.value]},
+        }).sort("timestamp", 1)
         decisions = await cursor.to_list(length=500)
 
         if len(decisions) < 2:
             return []
 
-        # Clear old conflict records for this project before recomputing
+        # Clear old conflicts before re-evaluating
         await db["decision_conflicts"].delete_many({"project_id": project_id})
 
         texts = [d["decision_text"] for d in decisions]
         embeddings = await self.embedding_service.generate_embeddings(texts)
 
-        # Step 1: cheap pairwise similarity pre-filter (no API calls)
         candidate_pairs = []
         for i in range(len(decisions)):
             for j in range(i + 1, len(decisions)):
@@ -186,44 +468,62 @@ class DecisionService:
                 if sim >= similarity_threshold:
                     candidate_pairs.append((i, j, sim))
 
-        if not candidate_pairs:
-            return []
-
-        # Step 2: expensive LLM call only for the filtered candidates
         saved_conflicts = []
         for i, j, sim in candidate_pairs:
             dec_a, dec_b = decisions[i], decisions[j]
-            prompt = f"""Decision A (made {dec_a.get('timestamp')}): {dec_a['decision_text']}
+            prompt = f"""Decision A (Timestamp: {dec_a.get('timestamp')}): {dec_a['decision_text']}
 Reasoning A: {dec_a.get('reasoning', 'N/A')}
 
-Decision B (made {dec_b.get('timestamp')}): {dec_b['decision_text']}
+Decision B (Timestamp: {dec_b.get('timestamp')}): {dec_b['decision_text']}
 Reasoning B: {dec_b.get('reasoning', 'N/A')}
 
-Do these two decisions conflict, does one supersede the other, or are they unrelated?
-Respond with ONLY valid JSON: {{"relationship": "conflict"|"supersedes"|"unrelated", "explanation": "one sentence why"}}"""
+Determine if these two decisions conflict, if one supersedes the other, or if they are unrelated.
+Respond with ONLY valid JSON: {{"relationship": "conflict"|"supersedes"|"unrelated", "explanation": "Brief explanation"}}"""
 
             try:
-                completion = await self.openai.chat.completions.create(
+                res = await self.openai.chat.completions.create(
                     model=self.model,
                     messages=[
-                        {"role": "system", "content": "You are a technical analyst comparing project decisions for contradictions. Always respond with valid JSON only."},
+                        {"role": "system", "content": "You are a technical analyst comparing software decisions. Respond in JSON only."},
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.1,
                     max_tokens=200,
                 )
-                raw = completion.choices[0].message.content.strip()
+                raw = res.choices[0].message.content.strip()
                 if raw.startswith("```"):
                     raw = raw.split("\n", 1)[1]
                     raw = raw.rsplit("```", 1)[0]
                 result = json.loads(raw)
-            except (json.JSONDecodeError, Exception) as e:
-                print(f"Conflict check failed for pair ({i},{j}): {e}")
+            except Exception as e:
+                print(f"[DecisionService] Conflict check failed for pair ({i},{j}): {e}")
                 continue
 
             relationship = result.get("relationship", "unrelated")
             if relationship == "unrelated":
-                continue  # don't store noise, only real relationships
+                continue
+
+            if relationship == "conflict":
+                await db["decisions"].update_many(
+                    {"decision_id": {"$in": [dec_a["decision_id"], dec_b["decision_id"]]}},
+                    {"$set": {"status": DecisionStatus.CONFLICTED.value, "updated_at": datetime.now(timezone.utc)}},
+                )
+            elif relationship == "supersedes":
+                await db["decisions"].update_one(
+                    {"decision_id": dec_a["decision_id"]},
+                    {"$set": {
+                        "status": DecisionStatus.SUPERSEDED.value,
+                        "superseded_by": dec_b["decision_id"],
+                        "updated_at": datetime.now(timezone.utc),
+                    }},
+                )
+                await db["decisions"].update_one(
+                    {"decision_id": dec_b["decision_id"]},
+                    {"$set": {
+                        "supersedes": dec_a["decision_id"],
+                        "updated_at": datetime.now(timezone.utc),
+                    }},
+                )
 
             conflict = DecisionConflictModel(
                 project_id=project_id,
@@ -237,3 +537,33 @@ Respond with ONLY valid JSON: {{"relationship": "conflict"|"supersedes"|"unrelat
 
         return saved_conflicts
 
+    async def get_relevant_decisions(
+        self,
+        project_id: str,
+        query_text: str,
+        db: AsyncIOMotorDatabase,
+        limit: int = 4,
+    ) -> list[DecisionModel]:
+        """Retrieve relevant project decisions for grounding Project Context."""
+        cursor = db["decisions"].find({
+            "project_id": project_id,
+            "status": {"$in": [DecisionStatus.ACTIVE.value, DecisionStatus.CONFLICTED.value]},
+        }).sort("timestamp", -1)
+        all_active = [DecisionModel(**doc) async for doc in cursor]
+
+        if not all_active:
+            return []
+
+        # If query contains decision signals or keywords, rank semantically
+        query_embedding = await self.embedding_service.generate_single_embedding(query_text)
+        decision_texts = [f"{d.decision_text} {d.reasoning}" for d in all_active]
+        embeddings = await self.embedding_service.generate_embeddings(decision_texts)
+
+        scored = []
+        for dec, emb in zip(all_active, embeddings):
+            score = self._cosine_similarity(query_embedding, emb)
+            if score >= 0.40:
+                scored.append((score, dec))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [dec for _, dec in scored[:limit]]

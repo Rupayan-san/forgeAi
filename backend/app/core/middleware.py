@@ -1,11 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
+from app.telemetry.middleware import TelemetryMiddleware
 
 
 def setup_middleware(app: FastAPI) -> None:
     """Configure application middleware."""
-    # CORS
+    # 1. Telemetry & Request Correlation Middleware
+    app.add_middleware(TelemetryMiddleware)
+
+    # 2. CORS — credentials must be True for HttpOnly cookie refresh tokens
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -18,4 +22,6 @@ def setup_middleware(app: FastAPI) -> None:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["Set-Cookie", "X-Request-ID"],
     )
+
