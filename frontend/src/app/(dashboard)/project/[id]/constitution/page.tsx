@@ -79,13 +79,13 @@ function TagListEditor({
   };
 
   return (
-    <div className="space-y-2">
-      <label className="block text-sm font-medium text-[#a3a3a3]">{label}</label>
-      <div className="flex flex-wrap gap-2 p-2.5 rounded-lg bg-[#0d0d0d] border border-[#222] min-h-[46px] items-center">
+    <div className="space-y-1.5">
+      <label className="block text-xs sm:text-sm font-medium text-[#a3a3a3]">{label}</label>
+      <div className="flex flex-wrap gap-2 p-2.5 rounded-lg bg-[#0d0d0d] border border-[#222] min-h-[44px] items-center">
         {tags.map((tag, i) => (
           <span
             key={i}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#1c1c1c] border border-[#2a2a2a] text-xs font-mono text-[#fafafa]"
+            className="flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-[#1c1c1c] border border-[#2a2a2a] text-xs font-mono text-[#fafafa]"
           >
             <span>{tag}</span>
             <button
@@ -104,7 +104,7 @@ function TagListEditor({
           onKeyDown={handleKeyDown}
           onBlur={handleAdd}
           placeholder={tags.length === 0 ? placeholder : "+ Add another"}
-          className="flex-1 min-w-[140px] bg-transparent text-sm text-[#fafafa] outline-none placeholder:text-[#525252] px-1.5"
+          className="flex-1 min-w-[140px] bg-transparent text-xs sm:text-sm text-[#fafafa] outline-none placeholder:text-[#525252] px-1.5"
         />
       </div>
     </div>
@@ -208,30 +208,48 @@ export default function ConstitutionPage() {
   const isViewingHistory = !!selectedHistorySnapshot;
 
   return (
-    <div className="p-6 lg:p-8 max-w-[1200px] space-y-7">
-      {/* Top Navigation & Back */}
-      <div className="flex items-center justify-between">
-        <Link
-          href={`/project/${projectId}`}
-          className="inline-flex items-center gap-2 text-sm font-medium text-[#888] hover:text-[#fafafa] transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Back to {currentProject?.name || "Workspace"}
-        </Link>
-        <div className="flex items-center gap-2.5">
+    <div className="flex-1 space-y-5 p-5 lg:p-8 max-w-[1400px] w-full mx-auto animate-fade-in bg-background text-foreground transition-colors duration-200">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border">
+        <div className="flex items-start gap-3 min-w-0">
+          <Link
+            href={`/project/${projectId}`}
+            className="p-2 rounded-lg bg-card hover:bg-accent border border-border text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0 mt-0.5 shadow-xs"
+            title="Back to Project"
+            aria-label="Back to Project"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </Link>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h1 className="text-lg sm:text-xl font-bold tracking-tight text-foreground truncate">
+                Project Constitution
+              </h1>
+              <span className="px-2.5 py-0.5 rounded-md text-xs font-mono font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                v{currentVersion}
+              </span>
+              <span className="text-xs text-muted-foreground font-mono">Authoritative Technical Agreement</span>
+            </div>
+            <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
+              The authoritative technical stack, architecture rules, coding standards, and agreements for <strong className="text-foreground">{currentProject?.name}</strong>. Grounded as primary context for Forge AI.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => setShowHistoryModal(true)}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-lg border border-[#262626] bg-[#111] text-[#a3a3a3] hover:text-[#fafafa] text-sm font-medium transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border bg-card text-muted-foreground hover:text-foreground text-xs sm:text-sm font-medium transition-colors cursor-pointer shadow-xs"
           >
-            <History className="w-4 h-4" />
+            <History className="w-3.5 h-3.5" />
             History ({history.length + 1})
           </button>
           {isOwner && (
             <button
               onClick={handleOpenEdit}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#10b981] hover:bg-[#059669] text-white text-sm font-semibold transition-colors cursor-pointer shadow-xs"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-emerald-500 hover:bg-emerald-600 text-white text-xs sm:text-sm font-semibold transition-colors cursor-pointer shadow-xs"
             >
-              <Edit3 className="w-4 h-4" />
+              <Edit3 className="w-3.5 h-3.5" />
               Edit Constitution
             </button>
           )}
@@ -240,9 +258,9 @@ export default function ConstitutionPage() {
 
       {/* Snapshot Viewing Notice */}
       {isViewingHistory && (
-        <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between">
-          <div className="flex items-center gap-2.5 text-amber-300 text-sm">
-            <History className="w-4.5 h-4.5 shrink-0" />
+        <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-amber-300 text-xs sm:text-sm">
+            <History className="w-4 h-4 shrink-0" />
             <span>
               Viewing historical snapshot <strong>v{selectedHistorySnapshot.version}</strong> (from{" "}
               {formatDateTime(selectedHistorySnapshot.updated_at)})
@@ -257,299 +275,289 @@ export default function ConstitutionPage() {
         </div>
       )}
 
-      {/* Hero Header Banner */}
-      <div className="surface p-6 sm:p-7 border border-emerald-500/20 bg-gradient-to-br from-emerald-950/25 via-[#0d0d0d] to-[#080808] rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-5">
-        <div className="flex items-start gap-4 sm:gap-5">
-          <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center shrink-0 text-[#10b981] shadow-xs">
-            <ScrollText className="w-7 h-7" strokeWidth={1.5} />
-          </div>
-          <div>
-            <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-2xl sm:text-3xl font-bold text-[#fafafa] tracking-tight">Project Constitution</h1>
-              <span className="px-2.5 py-1 rounded-md text-xs font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
-                v{currentVersion}
-              </span>
-              <span className="text-xs text-[#888] font-mono">Authoritative Technical Agreement</span>
-            </div>
-            <p className="text-[#a3a3a3] text-sm sm:text-base leading-relaxed mt-1.5 max-w-2xl">
-              The authoritative set of architecture decisions, coding rules, git protocols, and technology agreements
-              for <strong className="text-[#fafafa]">{currentProject?.name}</strong>. Grounded as primary context for
-              Forge AI.
-            </p>
-            <div className="flex items-center gap-3 text-xs text-[#737373] mt-2.5">
-              <span>Updated: {formatDateTime(constitution?.updated_at || "")}</span>
-              <span>·</span>
-              <span>Updated by: {constitution?.updated_by || "System"}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 7 Constitution Section Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      {/* 7 Constitution Section Cards in Dense 3-Column Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* 1. Technology Stack */}
-        <div className="surface p-6 space-y-4 rounded-xl border border-[#222]">
-          <div className="flex items-center gap-2.5 border-b border-[#1f1f1f] pb-3">
-            <Cpu className="w-5 h-5 text-emerald-400" />
-            <h2 className="text-base sm:text-lg font-semibold text-[#fafafa]">1. Technology Stack</h2>
+        <div className="bg-card p-4 sm:p-5 space-y-3 rounded-xl border border-border shadow-xs hover:border-zinc-400 dark:hover:border-zinc-700 transition-all flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-2 border-b border-border pb-2.5 mb-3">
+              <Cpu className="w-4 h-4 text-emerald-500" />
+              <h2 className="text-sm sm:text-base font-bold text-foreground">1. Technology Stack</h2>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <span className="text-muted-foreground block text-xs font-mono font-bold uppercase tracking-wider mb-1.5">Languages:</span>
+                {s?.technology.languages && s.technology.languages.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {s.technology.languages.map((l, i) => (
+                      <span key={i} className="px-2.5 py-0.5 rounded-md bg-secondary text-secondary-foreground border border-border font-mono text-xs sm:text-sm font-medium">
+                        {l}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground italic text-xs">Not specified</span>
+                )}
+              </div>
+              <div>
+                <span className="text-muted-foreground block text-xs font-mono font-bold uppercase tracking-wider mb-1.5">Frameworks:</span>
+                {s?.technology.frameworks && s.technology.frameworks.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {s.technology.frameworks.map((f, i) => (
+                      <span key={i} className="px-2.5 py-0.5 rounded-md bg-secondary text-secondary-foreground border border-border font-mono text-xs sm:text-sm font-medium">
+                        {f}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground italic text-xs">Not specified</span>
+                )}
+              </div>
+              <div>
+                <span className="text-muted-foreground block text-xs font-mono font-bold uppercase tracking-wider mb-1.5">Databases:</span>
+                {s?.technology.databases && s.technology.databases.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {s.technology.databases.map((d, i) => (
+                      <span key={i} className="px-2.5 py-0.5 rounded-md bg-secondary text-secondary-foreground border border-border font-mono text-xs sm:text-sm font-medium">
+                        {d}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground italic text-xs">Not specified</span>
+                )}
+              </div>
+            </div>
           </div>
-          <div className="space-y-3 text-sm">
-            <div>
-              <span className="text-[#888] block text-xs font-semibold mb-1.5 uppercase tracking-wide">Languages:</span>
-              {s?.technology.languages && s.technology.languages.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {s.technology.languages.map((l, i) => (
-                    <span key={i} className="px-2.5 py-1 rounded-md bg-[#141414] border border-[#2a2a2a] text-[#fafafa] font-mono text-xs font-medium">
-                      {l}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <span className="text-[#525252] italic text-xs">Not specified</span>
-              )}
-            </div>
-            <div>
-              <span className="text-[#888] block text-xs font-semibold mb-1.5 uppercase tracking-wide">Frameworks:</span>
-              {s?.technology.frameworks && s.technology.frameworks.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {s.technology.frameworks.map((f, i) => (
-                    <span key={i} className="px-2.5 py-1 rounded-md bg-[#141414] border border-[#2a2a2a] text-[#fafafa] font-mono text-xs font-medium">
-                      {f}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <span className="text-[#525252] italic text-xs">Not specified</span>
-              )}
-            </div>
-            <div>
-              <span className="text-[#888] block text-xs font-semibold mb-1.5 uppercase tracking-wide">Databases:</span>
-              {s?.technology.databases && s.technology.databases.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {s.technology.databases.map((d, i) => (
-                    <span key={i} className="px-2.5 py-1 rounded-md bg-[#141414] border border-[#2a2a2a] text-[#fafafa] font-mono text-xs font-medium">
-                      {d}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <span className="text-[#525252] italic text-xs">Not specified</span>
-              )}
-            </div>
-            {s?.technology.notes && (
-              <p className="text-[#888] text-xs pt-2 border-t border-[#181818] leading-relaxed">
-                <strong className="text-[#a3a3a3]">Notes:</strong> {s.technology.notes}
-              </p>
-            )}
-          </div>
+          {s?.technology.notes && (
+            <p className="text-muted-foreground text-xs sm:text-sm pt-2 border-t border-border leading-relaxed mt-2">
+              <strong className="text-foreground font-bold">Notes:</strong> {s.technology.notes}
+            </p>
+          )}
         </div>
 
         {/* 2. Architecture */}
-        <div className="surface p-6 space-y-4 rounded-xl border border-[#222]">
-          <div className="flex items-center gap-2.5 border-b border-[#1f1f1f] pb-3">
-            <Layers className="w-5 h-5 text-purple-400" />
-            <h2 className="text-base sm:text-lg font-semibold text-[#fafafa]">2. Architecture Rules</h2>
-          </div>
-          <div className="space-y-3 text-sm">
-            <div>
-              <span className="text-[#888] text-xs font-semibold uppercase tracking-wide">Style: </span>
-              <span className="text-[#fafafa] font-semibold text-sm ml-1">{s?.architecture.style || "Unspecified"}</span>
+        <div className="bg-card p-4 sm:p-5 space-y-3 rounded-xl border border-border shadow-xs hover:border-zinc-400 dark:hover:border-zinc-700 transition-all flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-2 border-b border-border pb-2.5 mb-3">
+              <Layers className="w-4 h-4 text-purple-500" />
+              <h2 className="text-sm sm:text-base font-bold text-foreground">2. Architecture Rules</h2>
             </div>
-            <div>
-              <span className="text-[#888] block text-xs font-semibold mb-1.5 uppercase tracking-wide">Core Architecture Rules:</span>
-              {s?.architecture.rules && s.architecture.rules.length > 0 ? (
-                <ul className="space-y-1.5">
-                  {s.architecture.rules.map((r, i) => (
-                    <li key={i} className="flex items-start gap-2 text-[#d4d4d4] text-sm leading-relaxed">
-                      <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                      <span>{r}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <span className="text-[#525252] italic text-xs">No rules defined yet</span>
-              )}
+            <div className="space-y-3">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-muted-foreground text-xs font-mono font-bold uppercase tracking-wider">Style:</span>
+                <span className="px-2.5 py-0.5 rounded-md bg-secondary text-secondary-foreground font-mono text-xs sm:text-sm font-medium border border-border">
+                  {s?.architecture.style || "Unspecified"}
+                </span>
+              </div>
+              <div>
+                <span className="text-muted-foreground block text-xs font-mono font-bold uppercase tracking-wider mb-1.5">Core Rules:</span>
+                {s?.architecture.rules && s.architecture.rules.length > 0 ? (
+                  <ul className="space-y-1.5">
+                    {s.architecture.rules.map((r, i) => (
+                      <li key={i} className="flex items-start gap-2 text-foreground text-xs sm:text-sm font-medium leading-snug">
+                        <Check className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                        <span>{r}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <span className="text-muted-foreground italic text-xs">No rules defined yet</span>
+                )}
+              </div>
             </div>
-            {s?.architecture.notes && (
-              <p className="text-[#888] text-xs pt-2 border-t border-[#181818] leading-relaxed">
-                <strong className="text-[#a3a3a3]">Notes:</strong> {s.architecture.notes}
-              </p>
-            )}
           </div>
+          {s?.architecture.notes && (
+            <p className="text-muted-foreground text-xs sm:text-sm pt-2 border-t border-border leading-relaxed mt-2">
+              <strong className="text-foreground font-bold">Notes:</strong> {s.architecture.notes}
+            </p>
+          )}
         </div>
 
         {/* 3. Coding Standards */}
-        <div className="surface p-6 space-y-4 rounded-xl border border-[#222]">
-          <div className="flex items-center gap-2.5 border-b border-[#1f1f1f] pb-3">
-            <Code2 className="w-5 h-5 text-blue-400" />
-            <h2 className="text-base sm:text-lg font-semibold text-[#fafafa]">3. Coding Standards</h2>
-          </div>
-          <div className="space-y-3 text-sm">
-            <div>
-              <span className="text-[#888] block text-xs font-semibold mb-1.5 uppercase tracking-wide">Naming & Conventions:</span>
-              {s?.coding_standards.naming_conventions && s.coding_standards.naming_conventions.length > 0 ? (
-                <ul className="space-y-1.5">
-                  {s.coding_standards.naming_conventions.map((n, i) => (
-                    <li key={i} className="flex items-start gap-2 text-[#d4d4d4] text-sm leading-relaxed">
-                      <span className="text-blue-400 font-mono text-sm">•</span>
-                      <span>{n}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <span className="text-[#525252] italic text-xs">Not specified</span>
-              )}
+        <div className="bg-card p-4 sm:p-5 space-y-3 rounded-xl border border-border shadow-xs hover:border-zinc-400 dark:hover:border-zinc-700 transition-all flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-2 border-b border-border pb-2.5 mb-3">
+              <Code2 className="w-4 h-4 text-blue-500" />
+              <h2 className="text-sm sm:text-base font-bold text-foreground">3. Coding Standards</h2>
             </div>
-            <div>
-              <span className="text-[#888] block text-xs font-semibold mb-1.5 uppercase tracking-wide">Error Handling:</span>
-              {s?.coding_standards.error_handling && s.coding_standards.error_handling.length > 0 ? (
-                <ul className="space-y-1.5">
-                  {s.coding_standards.error_handling.map((e, i) => (
-                    <li key={i} className="flex items-start gap-2 text-[#d4d4d4] text-sm leading-relaxed">
-                      <span className="text-blue-400 font-mono text-sm">•</span>
-                      <span>{e}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <span className="text-[#525252] italic text-xs">Not specified</span>
-              )}
+            <div className="space-y-3">
+              <div>
+                <span className="text-muted-foreground block text-xs font-mono font-bold uppercase tracking-wider mb-1.5">Naming & Conventions:</span>
+                {s?.coding_standards.naming_conventions && s.coding_standards.naming_conventions.length > 0 ? (
+                  <ul className="space-y-1.5">
+                    {s.coding_standards.naming_conventions.map((n, i) => (
+                      <li key={i} className="flex items-start gap-2 text-foreground text-xs sm:text-sm font-medium leading-snug">
+                        <span className="text-blue-500 font-mono font-bold">•</span>
+                        <span>{n}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <span className="text-muted-foreground italic text-xs">Not specified</span>
+                )}
+              </div>
+              <div>
+                <span className="text-muted-foreground block text-xs font-mono font-bold uppercase tracking-wider mb-1.5">Error Handling:</span>
+                {s?.coding_standards.error_handling && s.coding_standards.error_handling.length > 0 ? (
+                  <ul className="space-y-1.5">
+                    {s.coding_standards.error_handling.map((e, i) => (
+                      <li key={i} className="flex items-start gap-2 text-foreground text-xs sm:text-sm font-medium leading-snug">
+                        <span className="text-blue-500 font-mono font-bold">•</span>
+                        <span>{e}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <span className="text-muted-foreground italic text-xs">Not specified</span>
+                )}
+              </div>
             </div>
           </div>
         </div>
 
         {/* 4. Git Workflow */}
-        <div className="surface p-6 space-y-4 rounded-xl border border-[#222]">
-          <div className="flex items-center gap-2.5 border-b border-[#1f1f1f] pb-3">
-            <GitBranch className="w-5 h-5 text-amber-400" />
-            <h2 className="text-base sm:text-lg font-semibold text-[#fafafa]">4. Git Workflow</h2>
-          </div>
-          <div className="space-y-3 text-sm">
-            <div>
-              <span className="text-[#888] text-xs font-semibold uppercase tracking-wide">Merge Strategy: </span>
-              <span className="text-[#fafafa] font-semibold text-sm ml-1">{s?.git_workflow.merge_strategy || "Unspecified"}</span>
+        <div className="bg-card p-4 sm:p-5 space-y-3 rounded-xl border border-border shadow-xs hover:border-zinc-400 dark:hover:border-zinc-700 transition-all flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-2 border-b border-border pb-2.5 mb-3">
+              <GitBranch className="w-4 h-4 text-amber-500" />
+              <h2 className="text-sm sm:text-base font-bold text-foreground">4. Git Workflow</h2>
             </div>
-            <div>
-              <span className="text-[#888] block text-xs font-semibold mb-1.5 uppercase tracking-wide">Branch Naming:</span>
-              {s?.git_workflow.branch_naming && s.git_workflow.branch_naming.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {s.git_workflow.branch_naming.map((b, i) => (
-                    <span key={i} className="px-2.5 py-1 rounded-md bg-[#141414] border border-[#2a2a2a] text-[#fafafa] font-mono text-xs font-medium">
-                      {b}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <span className="text-[#525252] italic text-xs">Not specified</span>
-              )}
-            </div>
-            <div>
-              <span className="text-[#888] block text-xs font-semibold mb-1.5 uppercase tracking-wide">Commit Conventions:</span>
-              {s?.git_workflow.commit_conventions && s.git_workflow.commit_conventions.length > 0 ? (
-                <ul className="space-y-1.5">
-                  {s.git_workflow.commit_conventions.map((c, i) => (
-                    <li key={i} className="text-[#d4d4d4] font-mono text-xs leading-relaxed bg-[#111] px-2.5 py-1 rounded border border-[#222]">
-                      {c}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <span className="text-[#525252] italic text-xs">Not specified</span>
-              )}
+            <div className="space-y-3">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-muted-foreground text-xs font-mono font-bold uppercase tracking-wider">Merge:</span>
+                <span className="px-2.5 py-0.5 rounded-md bg-secondary text-secondary-foreground font-mono text-xs sm:text-sm font-medium border border-border">
+                  {s?.git_workflow.merge_strategy || "Unspecified"}
+                </span>
+              </div>
+              <div>
+                <span className="text-muted-foreground block text-xs font-mono font-bold uppercase tracking-wider mb-1.5">Branch Naming:</span>
+                {s?.git_workflow.branch_naming && s.git_workflow.branch_naming.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {s.git_workflow.branch_naming.map((b, i) => (
+                      <span key={i} className="px-2.5 py-0.5 rounded-md bg-secondary text-secondary-foreground border border-border font-mono text-xs sm:text-sm font-medium">
+                        {b}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground italic text-xs">Not specified</span>
+                )}
+              </div>
+              <div>
+                <span className="text-muted-foreground block text-xs font-mono font-bold uppercase tracking-wider mb-1.5">Commit Conventions:</span>
+                {s?.git_workflow.commit_conventions && s.git_workflow.commit_conventions.length > 0 ? (
+                  <ul className="space-y-1">
+                    {s.git_workflow.commit_conventions.map((c, i) => (
+                      <li key={i} className="text-foreground font-mono text-xs sm:text-sm font-medium leading-relaxed bg-secondary/60 px-2.5 py-1 rounded border border-border">
+                        {c}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <span className="text-muted-foreground italic text-xs">Not specified</span>
+                )}
+              </div>
             </div>
           </div>
         </div>
 
         {/* 5. API Conventions */}
-        <div className="surface p-6 space-y-4 rounded-xl border border-[#222]">
-          <div className="flex items-center gap-2.5 border-b border-[#1f1f1f] pb-3">
-            <Globe className="w-5 h-5 text-teal-400" />
-            <h2 className="text-base sm:text-lg font-semibold text-[#fafafa]">5. API Conventions</h2>
-          </div>
-          <div className="space-y-3 text-sm">
-            <div>
-              <span className="text-[#888] text-xs font-semibold uppercase tracking-wide">Style: </span>
-              <span className="text-[#fafafa] font-semibold text-sm ml-1">{s?.api_conventions.style || "REST"}</span>
+        <div className="bg-card p-4 sm:p-5 space-y-3 rounded-xl border border-border shadow-xs hover:border-zinc-400 dark:hover:border-zinc-700 transition-all flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-2 border-b border-border pb-2.5 mb-3">
+              <Globe className="w-4 h-4 text-teal-500" />
+              <h2 className="text-sm sm:text-base font-bold text-foreground">5. API Conventions</h2>
             </div>
-            <div>
-              <span className="text-[#888] block text-xs font-semibold mb-1.5 uppercase tracking-wide">Endpoint Naming:</span>
-              {s?.api_conventions.endpoint_naming && s.api_conventions.endpoint_naming.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {s.api_conventions.endpoint_naming.map((ep, i) => (
-                    <span key={i} className="px-2.5 py-1 rounded-md bg-[#141414] border border-[#2a2a2a] text-[#fafafa] font-mono text-xs font-medium">
-                      {ep}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <span className="text-[#525252] italic text-xs">Not specified</span>
-              )}
+            <div className="space-y-3">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-muted-foreground text-xs font-mono font-bold uppercase tracking-wider">Style:</span>
+                <span className="px-2.5 py-0.5 rounded-md bg-secondary text-secondary-foreground font-mono text-xs sm:text-sm font-medium border border-border">
+                  {s?.api_conventions.style || "REST"}
+                </span>
+              </div>
+              <div>
+                <span className="text-muted-foreground block text-xs font-mono font-bold uppercase tracking-wider mb-1.5">Endpoint Naming:</span>
+                {s?.api_conventions.endpoint_naming && s.api_conventions.endpoint_naming.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {s.api_conventions.endpoint_naming.map((ep, i) => (
+                      <span key={i} className="px-2.5 py-0.5 rounded-md bg-secondary text-secondary-foreground border border-border font-mono text-xs sm:text-sm font-medium">
+                        {ep}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground italic text-xs">Not specified</span>
+                )}
+              </div>
             </div>
           </div>
         </div>
 
         {/* 6. Design & UI Conventions */}
-        <div className="surface p-6 space-y-4 rounded-xl border border-[#222]">
-          <div className="flex items-center gap-2.5 border-b border-[#1f1f1f] pb-3">
-            <Palette className="w-5 h-5 text-pink-400" />
-            <h2 className="text-base sm:text-lg font-semibold text-[#fafafa]">6. Design / UI Conventions</h2>
+        <div className="bg-card p-4 sm:p-5 space-y-3 rounded-xl border border-border shadow-xs hover:border-zinc-400 dark:hover:border-zinc-700 transition-all flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-2 border-b border-border pb-2.5 mb-3">
+              <Palette className="w-4 h-4 text-pink-500" />
+              <h2 className="text-sm sm:text-base font-bold text-foreground">6. Design / UI Conventions</h2>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <span className="text-muted-foreground block text-xs font-mono font-bold uppercase tracking-wider mb-1.5">Component & Styling Rules:</span>
+                {s?.design_ui_conventions.styling_conventions && s.design_ui_conventions.styling_conventions.length > 0 ? (
+                  <ul className="space-y-1.5">
+                    {s.design_ui_conventions.styling_conventions.map((sc, i) => (
+                      <li key={i} className="text-foreground text-xs sm:text-sm font-medium leading-snug flex items-start gap-2">
+                        <span className="text-pink-500 font-mono font-bold">•</span>
+                        <span>{sc}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <span className="text-muted-foreground italic text-xs">Not specified</span>
+                )}
+              </div>
+            </div>
           </div>
-          <div className="space-y-3 text-sm">
+        </div>
+
+        {/* 7. General Rules & Restrictions (Spanning all columns) */}
+        <div className="col-span-1 md:col-span-2 lg:col-span-3 bg-card p-4 sm:p-5 space-y-3 rounded-xl border border-rose-500/30 bg-rose-500/5 shadow-xs">
+          <div className="flex items-center gap-2 border-b border-border pb-2.5">
+            <AlertOctagon className="w-4 h-4 text-rose-500" />
+            <h2 className="text-sm sm:text-base font-bold text-foreground">7. General Rules & Hard Restrictions</h2>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <span className="text-[#888] block text-xs font-semibold mb-1.5 uppercase tracking-wide">Component & Styling Rules:</span>
-              {s?.design_ui_conventions.styling_conventions && s.design_ui_conventions.styling_conventions.length > 0 ? (
-                <ul className="space-y-1.5">
-                  {s.design_ui_conventions.styling_conventions.map((sc, i) => (
-                    <li key={i} className="text-[#d4d4d4] text-sm leading-relaxed flex items-start gap-2">
-                      <span className="text-pink-400 font-mono text-sm">•</span>
-                      <span>{sc}</span>
+              <span className="text-rose-500 block text-xs font-mono font-bold uppercase tracking-wider mb-2">Strict Restrictions:</span>
+              {s?.general_rules.restrictions && s.general_rules.restrictions.length > 0 ? (
+                <ul className="space-y-2">
+                  {s.general_rules.restrictions.map((r, i) => (
+                    <li key={i} className="flex items-start gap-2 text-rose-600 dark:text-rose-200 bg-rose-500/10 p-2.5 rounded-lg border border-rose-500/25 text-xs sm:text-sm font-medium leading-snug">
+                      <X className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                      <span>{r}</span>
                     </li>
                   ))}
                 </ul>
               ) : (
-                <span className="text-[#525252] italic text-xs">Not specified</span>
+                <span className="text-muted-foreground italic text-xs">No hard restrictions specified</span>
               )}
             </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 7. General Rules & Restrictions (Full Width) */}
-      <div className="surface p-6 sm:p-7 space-y-4 rounded-xl border border-red-500/25 bg-gradient-to-r from-red-950/15 via-transparent to-transparent">
-        <div className="flex items-center gap-2.5 border-b border-[#1f1f1f] pb-3">
-          <AlertOctagon className="w-5 h-5 text-red-400" />
-          <h2 className="text-base sm:text-lg font-semibold text-[#fafafa]">7. General Rules & Hard Restrictions</h2>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-sm">
-          <div>
-            <span className="text-[#888] block text-xs font-semibold mb-2 uppercase tracking-wide">Strict Restrictions:</span>
-            {s?.general_rules.restrictions && s.general_rules.restrictions.length > 0 ? (
-              <ul className="space-y-2">
-                {s.general_rules.restrictions.map((r, i) => (
-                  <li key={i} className="flex items-start gap-2.5 text-red-200 bg-red-950/25 p-3 rounded-lg border border-red-500/25 text-sm leading-relaxed">
-                    <X className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                    <span>{r}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <span className="text-[#525252] italic text-xs">No hard restrictions specified</span>
-            )}
-          </div>
-          <div>
-            <span className="text-[#888] block text-xs font-semibold mb-2 uppercase tracking-wide">Custom Agreements:</span>
-            {s?.general_rules.custom_rules && s.general_rules.custom_rules.length > 0 ? (
-              <ul className="space-y-2">
-                {s.general_rules.custom_rules.map((cr, i) => (
-                  <li key={i} className="flex items-start gap-2.5 text-emerald-200 bg-emerald-950/25 p-3 rounded-lg border border-emerald-500/25 text-sm leading-relaxed">
-                    <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                    <span>{cr}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <span className="text-[#525252] italic text-xs">No custom agreements specified</span>
-            )}
+            <div>
+              <span className="text-emerald-500 block text-xs font-mono font-bold uppercase tracking-wider mb-2">Custom Agreements:</span>
+              {s?.general_rules.custom_rules && s.general_rules.custom_rules.length > 0 ? (
+                <ul className="space-y-2">
+                  {s.general_rules.custom_rules.map((cr, i) => (
+                    <li key={i} className="flex items-start gap-2 text-emerald-600 dark:text-emerald-200 bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/25 text-xs sm:text-sm font-medium leading-snug">
+                      <Check className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                      <span>{cr}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <span className="text-muted-foreground italic text-xs">No custom agreements specified</span>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -560,8 +568,8 @@ export default function ConstitutionPage() {
           <div className="surface w-full max-w-3xl max-h-[90vh] flex flex-col rounded-xl overflow-hidden border border-[#2a2a2a] shadow-2xl animate-scale-in">
             <div className="p-4 sm:p-5 border-b border-[#222] flex items-center justify-between bg-[#111]">
               <div className="flex items-center gap-2.5">
-                <Edit3 className="w-5 h-5 text-[#10b981]" />
-                <h2 className="text-base font-bold text-[#fafafa]">
+                <Edit3 className="w-4 h-4 text-[#10b981]" />
+                <h2 className="text-sm sm:text-base font-bold text-[#fafafa]">
                   Edit Project Constitution (v{constitution?.version} → v{(constitution?.version || 1) + 1})
                 </h2>
               </div>
@@ -569,7 +577,7 @@ export default function ConstitutionPage() {
                 onClick={() => setShowEditModal(false)}
                 className="text-[#737373] hover:text-[#fafafa] p-1.5 cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
@@ -587,11 +595,10 @@ export default function ConstitutionPage() {
                 <button
                   key={tab.id}
                   onClick={() => setEditTab(tab.id as "tech" | "arch" | "code" | "git" | "api" | "ui" | "rules")}
-                  className={`py-3 px-3.5 text-sm font-medium border-b-2 whitespace-nowrap cursor-pointer transition-colors ${
-                    editTab === tab.id
+                  className={`py-3 px-3.5 text-xs sm:text-sm font-medium border-b-2 whitespace-nowrap cursor-pointer transition-colors ${editTab === tab.id
                       ? "border-[#10b981] text-[#fafafa] font-semibold"
                       : "border-transparent text-[#737373] hover:text-[#a3a3a3]"
-                  }`}
+                    }`}
                 >
                   {tab.label}
                 </button>
@@ -599,9 +606,9 @@ export default function ConstitutionPage() {
             </div>
 
             {/* Tab content */}
-            <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5">
+            <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4">
               {editTab === "tech" && (
-                <div className="space-y-4">
+                <div className="space-y-3.5">
                   <TagListEditor
                     label="Programming Languages"
                     tags={editSections.technology.languages}
@@ -636,7 +643,7 @@ export default function ConstitutionPage() {
                     placeholder="e.g. MongoDB, Qdrant, Redis"
                   />
                   <div>
-                    <label className="block text-sm font-medium text-[#a3a3a3] mb-1.5">Notes / Additional Specs</label>
+                    <label className="block text-xs sm:text-sm font-medium text-[#a3a3a3] mb-1.5">Notes / Additional Specs</label>
                     <textarea
                       value={editSections.technology.notes || ""}
                       onChange={(e) =>
@@ -645,7 +652,7 @@ export default function ConstitutionPage() {
                           technology: { ...editSections.technology, notes: e.target.value },
                         })
                       }
-                      className="forge-input w-full p-3 text-sm min-h-[70px]"
+                      className="forge-input w-full p-3 text-xs sm:text-sm min-h-[70px]"
                       placeholder="Additional stack notes..."
                     />
                   </div>
@@ -653,9 +660,9 @@ export default function ConstitutionPage() {
               )}
 
               {editTab === "arch" && (
-                <div className="space-y-4">
+                <div className="space-y-3.5">
                   <div>
-                    <label className="block text-sm font-medium text-[#a3a3a3] mb-1.5">Architectural Style</label>
+                    <label className="block text-xs sm:text-sm font-medium text-[#a3a3a3] mb-1.5">Architectural Style</label>
                     <input
                       type="text"
                       value={editSections.architecture.style || ""}
@@ -665,7 +672,7 @@ export default function ConstitutionPage() {
                           architecture: { ...editSections.architecture, style: e.target.value },
                         })
                       }
-                      className="forge-input w-full px-3.5 py-2.5 text-sm"
+                      className="forge-input w-full px-3.5 py-2 text-xs sm:text-sm"
                       placeholder="e.g. Clean Architecture, Modular Monolith, Microservices"
                     />
                   </div>
@@ -695,7 +702,7 @@ export default function ConstitutionPage() {
               )}
 
               {editTab === "code" && (
-                <div className="space-y-4">
+                <div className="space-y-3.5">
                   <TagListEditor
                     label="Naming Conventions"
                     tags={editSections.coding_standards.naming_conventions}
@@ -722,9 +729,9 @@ export default function ConstitutionPage() {
               )}
 
               {editTab === "git" && (
-                <div className="space-y-4">
+                <div className="space-y-3.5">
                   <div>
-                    <label className="block text-sm font-medium text-[#a3a3a3] mb-1.5">Merge Strategy</label>
+                    <label className="block text-xs sm:text-sm font-medium text-[#a3a3a3] mb-1.5">Merge Strategy</label>
                     <input
                       type="text"
                       value={editSections.git_workflow.merge_strategy || ""}
@@ -734,7 +741,7 @@ export default function ConstitutionPage() {
                           git_workflow: { ...editSections.git_workflow, merge_strategy: e.target.value },
                         })
                       }
-                      className="forge-input w-full px-3.5 py-2.5 text-sm"
+                      className="forge-input w-full px-3.5 py-2 text-xs sm:text-sm"
                       placeholder="e.g. Squash and merge, Rebase, Linear history"
                     />
                   </div>
@@ -764,9 +771,9 @@ export default function ConstitutionPage() {
               )}
 
               {editTab === "api" && (
-                <div className="space-y-4">
+                <div className="space-y-3.5">
                   <div>
-                    <label className="block text-sm font-medium text-[#a3a3a3] mb-1.5">API Paradigm / Style</label>
+                    <label className="block text-xs sm:text-sm font-medium text-[#a3a3a3] mb-1.5">API Paradigm / Style</label>
                     <input
                       type="text"
                       value={editSections.api_conventions.style || "REST"}
@@ -776,7 +783,7 @@ export default function ConstitutionPage() {
                           api_conventions: { ...editSections.api_conventions, style: e.target.value },
                         })
                       }
-                      className="forge-input w-full px-3.5 py-2.5 text-sm"
+                      className="forge-input w-full px-3.5 py-2 text-xs sm:text-sm"
                       placeholder="e.g. REST, GraphQL, gRPC"
                     />
                   </div>
@@ -795,7 +802,7 @@ export default function ConstitutionPage() {
               )}
 
               {editTab === "ui" && (
-                <div className="space-y-4">
+                <div className="space-y-3.5">
                   <TagListEditor
                     label="Styling & Design System Conventions"
                     tags={editSections.design_ui_conventions.styling_conventions}
@@ -822,7 +829,7 @@ export default function ConstitutionPage() {
               )}
 
               {editTab === "rules" && (
-                <div className="space-y-4">
+                <div className="space-y-3.5">
                   <TagListEditor
                     label="Strict Technical Restrictions"
                     tags={editSections.general_rules.restrictions}
@@ -849,8 +856,8 @@ export default function ConstitutionPage() {
               )}
 
               {/* Change summary */}
-              <div className="pt-3.5 border-t border-[#222]">
-                <label className="block text-sm font-semibold text-[#10b981] mb-1.5">
+              <div className="pt-3 border-t border-[#222]">
+                <label className="block text-xs sm:text-sm font-semibold text-[#10b981] mb-1.5">
                   Change Summary (Recorded in Version History)
                 </label>
                 <input
@@ -858,11 +865,11 @@ export default function ConstitutionPage() {
                   value={changeSummary}
                   onChange={(e) => setChangeSummary(e.target.value)}
                   placeholder="e.g. Added PostgreSQL to stack and updated commit conventions"
-                  className="forge-input w-full px-3.5 py-2.5 text-sm"
+                  className="forge-input w-full px-3.5 py-2 text-xs sm:text-sm"
                 />
               </div>
 
-              {saveError && <p className="text-red-400 text-sm font-medium">{saveError}</p>}
+              {saveError && <p className="text-red-400 text-xs sm:text-sm font-medium">{saveError}</p>}
             </div>
 
             {/* Modal Footer */}
@@ -870,7 +877,7 @@ export default function ConstitutionPage() {
               <button
                 type="button"
                 onClick={() => setShowEditModal(false)}
-                className="px-4 py-2 rounded-lg border border-[#262626] text-[#a3a3a3] hover:text-[#fafafa] text-sm cursor-pointer"
+                className="px-4 py-2 rounded-lg border border-[#262626] text-[#a3a3a3] hover:text-[#fafafa] text-xs sm:text-sm cursor-pointer"
               >
                 Cancel
               </button>
@@ -878,7 +885,7 @@ export default function ConstitutionPage() {
                 type="button"
                 onClick={handleSaveConstitution}
                 disabled={isSaving}
-                className="flex items-center gap-2 px-5 py-2 rounded-lg bg-[#10b981] hover:bg-[#059669] text-white text-sm font-semibold transition-colors disabled:opacity-40 cursor-pointer shadow-xs"
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#10b981] hover:bg-[#059669] text-white text-xs sm:text-sm font-semibold transition-colors disabled:opacity-40 cursor-pointer shadow-xs"
               >
                 {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                 Publish Version {(constitution?.version || 1) + 1}
@@ -894,30 +901,30 @@ export default function ConstitutionPage() {
           <div className="surface w-full max-w-xl max-h-[80vh] flex flex-col rounded-xl overflow-hidden border border-[#2a2a2a] shadow-2xl animate-scale-in">
             <div className="p-4 sm:p-5 border-b border-[#222] flex items-center justify-between bg-[#111]">
               <div className="flex items-center gap-2.5">
-                <History className="w-5 h-5 text-[#10b981]" />
-                <h2 className="text-base font-bold text-[#fafafa]">Constitution Version History</h2>
+                <History className="w-4 h-4 text-[#10b981]" />
+                <h2 className="text-sm sm:text-base font-bold text-[#fafafa]">Constitution Version History</h2>
               </div>
               <button
                 onClick={() => setShowHistoryModal(false)}
                 className="text-[#737373] hover:text-[#fafafa] p-1.5 cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3">
               {/* Active version */}
-              <div className="p-4 rounded-xl bg-[#0e0e0e] border border-emerald-500/30 flex items-center justify-between">
+              <div className="p-3.5 rounded-xl bg-[#0e0e0e] border border-emerald-500/30 flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-emerald-400 font-mono font-bold text-sm">
+                    <span className="text-emerald-400 font-mono font-bold text-xs sm:text-sm">
                       v{constitution?.version}
                     </span>
                     <span className="text-xs text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded font-mono font-semibold">
                       Active
                     </span>
                   </div>
-                  <p className="text-xs text-[#888] mt-1.5">
+                  <p className="text-xs text-[#888] mt-1">
                     Updated {formatDateTime(constitution?.updated_at || "")} by {constitution?.updated_by}
                   </p>
                 </div>
@@ -936,14 +943,14 @@ export default function ConstitutionPage() {
               {history.map((item) => (
                 <div
                   key={item.id || item.version}
-                  className="p-4 rounded-xl bg-[#0a0a0a] border border-[#1f1f1f] flex items-center justify-between"
+                  className="p-3.5 rounded-xl bg-[#0a0a0a] border border-[#1f1f1f] flex items-center justify-between"
                 >
                   <div>
-                    <span className="text-[#a3a3a3] font-mono font-semibold text-sm">v{item.version}</span>
-                    <p className="text-sm text-[#fafafa] font-medium mt-0.5">
+                    <span className="text-[#a3a3a3] font-mono font-semibold text-xs sm:text-sm">v{item.version}</span>
+                    <p className="text-xs sm:text-sm text-[#fafafa] font-medium mt-0.5">
                       {item.change_summary || "Constitution update"}
                     </p>
-                    <p className="text-xs text-[#666] mt-1">
+                    <p className="text-xs text-[#666] mt-0.5">
                       {formatDateTime(item.updated_at)} by {item.updated_by}
                     </p>
                   </div>

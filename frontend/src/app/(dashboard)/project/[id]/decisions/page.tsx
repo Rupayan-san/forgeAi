@@ -192,7 +192,7 @@ export default function DecisionsPage() {
             <ArrowLeft className="w-4 h-4" />
           </Link>
           <div className="min-w-0">
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground truncate">
+            <h1 className="text-lg sm:text-xl font-bold tracking-tight text-foreground truncate">
               Decision Intelligence Log
             </h1>
             <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
@@ -274,7 +274,7 @@ export default function DecisionsPage() {
       {/* Filter Tabs & Source Filter */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-3">
         {/* Status Tabs */}
-        <div className="flex items-center gap-1 bg-card p-1 rounded-lg border border-border overflow-x-auto shadow-xs">
+        <div className="flex items-center gap-1.5 bg-card p-1 rounded-lg border border-border overflow-x-auto shadow-xs">
           {[
             { key: "ALL", label: "All Decisions", count: decisions.length },
             { key: "ACTIVE", label: "Active", count: activeCount, color: "text-emerald-600 dark:text-emerald-400" },
@@ -284,7 +284,7 @@ export default function DecisionsPage() {
             <button
               key={key}
               onClick={() => setStatusFilter(key)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all whitespace-nowrap cursor-pointer ${
                 statusFilter === key
                   ? "bg-accent text-accent-foreground font-semibold shadow-xs"
                   : "text-muted-foreground hover:text-foreground"
@@ -292,7 +292,7 @@ export default function DecisionsPage() {
             >
               <span>{label}</span>
               <span
-                className={`text-[11px] px-1.5 py-0.2 rounded-full font-mono bg-background border border-border ${color || ""}`}
+                className={`text-xs px-2 py-0.5 rounded-full font-mono bg-background border border-border ${color || ""}`}
               >
                 {count}
               </span>
@@ -302,7 +302,7 @@ export default function DecisionsPage() {
 
         {/* Source Dropdown / Buttons */}
         <div className="flex items-center gap-1.5">
-          <Filter className="w-3.5 h-3.5 text-muted-foreground" strokeWidth={1.5} />
+          <Filter className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
           {[
             { key: "all", label: "All" },
             { key: "pr", label: "Pull Requests" },
@@ -312,7 +312,7 @@ export default function DecisionsPage() {
             <button
               key={key}
               onClick={() => setSourceFilter(key)}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+              className={`px-3 py-1 rounded-md text-xs sm:text-sm font-medium transition-colors cursor-pointer ${
                 sourceFilter === key
                   ? "bg-card text-foreground font-semibold border border-border shadow-xs"
                   : "text-muted-foreground hover:text-foreground border border-transparent"

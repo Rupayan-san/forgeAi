@@ -2,14 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useAuthStore } from "@/store/use-auth-store";
 import { useProjectStore } from "@/store/use-project-store";
 import { useSearchStore } from "@/store/use-search-store";
 import { Sidebar } from "@/components/shared/sidebar";
 import { SearchCommandDialog } from "@/components/shared/search-command-dialog";
 import { useTheme } from "@/components/theme-provider";
-import { Loader2, Menu, X, Sun, Moon } from "lucide-react";
+import { Loader2, Menu, X, Sun, Moon, LayoutDashboard } from "lucide-react";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { theme, toggleTheme } = useTheme();
@@ -22,6 +22,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const fetchProjects = useProjectStore((state) => state.fetchProjects);
   const router = useRouter();
+  const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -108,13 +109,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <main className="lg:ml-[250px] pt-14 lg:pt-0 min-h-screen flex flex-col bg-background text-foreground transition-colors duration-200">
         {/* Desktop Top Header Bar */}
         <header className="hidden lg:flex h-14 items-center justify-between px-6 border-b border-border shrink-0 bg-background/95 backdrop-blur-xs">
-          <div className="flex items-center gap-4">
-            <button className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer" title="Toggle sidebar">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect width="18" height="18" x="3" y="3" rx="2" />
-                <path d="M9 3v18" />
-              </svg>
-            </button>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/dashboard"
+              prefetch={true}
+              className={`p-2 rounded-lg transition-colors cursor-pointer flex items-center justify-center border shadow-xs ${
+                pathname === "/dashboard"
+                  ? "bg-accent text-foreground border-border font-semibold"
+                  : "bg-card text-muted-foreground hover:text-foreground hover:bg-accent border-border"
+              }`}
+              title="Go to Dashboard"
+              aria-label="Go to Dashboard"
+            >
+              <LayoutDashboard className="w-4.5 h-4.5 text-emerald-500" strokeWidth={2} />
+            </Link>
             <div
               onClick={() => openSearch()}
               className="relative w-72 cursor-pointer group"
@@ -135,7 +143,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div className="flex items-center gap-4 text-sm">
             <Link
               href="/dashboard"
-              className="text-foreground font-semibold hover:text-primary transition-colors"
+              prefetch={true}
+              className={`transition-colors font-medium ${
+                pathname === "/dashboard"
+                  ? "text-emerald-500 font-bold"
+                  : "text-foreground hover:text-emerald-500"
+              }`}
             >
               Dashboard
             </Link>
