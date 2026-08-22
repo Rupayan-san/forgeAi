@@ -135,9 +135,11 @@ RECENT MEETING DIALOGUE:
                 max_tokens=350,
             )
             response_text = completion.choices[0].message.content or f"I heard your question regarding '{query}'."
-        except Exception as err:
-            print(f"[MeetingAIService] Generation error: {err}")
-            response_text = f"I reviewed our project knowledge regarding '{query}'."
+        except Exception:
+            # Do not persist or broadcast a fabricated answer when the LLM is
+            # unavailable. The API layer reports the provider failure.
+            meeting_connection_manager.set_ai_state(meeting_id, "IDLE")
+            raise
 
         # 5. Broadcast response and SPEAKING state
         meeting_connection_manager.set_ai_state(meeting_id, "SPEAKING")

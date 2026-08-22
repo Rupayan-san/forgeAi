@@ -22,8 +22,8 @@ class BaseReranker(ABC):
         pass
 
 
-class CrossEncoderReranker(BaseReranker):
-    """Production cross-relevance scoring engine with exact symbol awareness, source authority, and temporal decay."""
+class WeightedReranker(BaseReranker):
+    """Heuristic weighted reranker; this is not a neural cross-encoder."""
 
     SOURCE_AUTHORITY_WEIGHTS = {
         "constitution": 1.4,

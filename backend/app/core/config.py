@@ -1,3 +1,4 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -61,6 +62,31 @@ class Settings(BaseSettings):
     LANGCHAIN_TRACING_V2: str = "false"
     LANGCHAIN_API_KEY: str = ""
     LANGCHAIN_PROJECT: str = "forge-ai"
+
+    @model_validator(mode="after")
+    def validate_production_secrets(self):
+        """Reject development placeholders outside explicit development mode."""
+        if self.ENVIRONMENT.lower() not in {"production", "prod", "staging"}:
+            return self
+
+        placeholders = {
+            "dev-secret-key-change-in-production",
+            "sk-forge-dev-placeholder",
+            "your-secret-key-change-in-production",
+        }
+        required = {
+            "SECRET_KEY": self.SECRET_KEY,
+            "MONGODB_URL": self.MONGODB_URL,
+            "OPENAI_API_KEY": self.OPENAI_API_KEY,
+            "QDRANT_URL": self.QDRANT_URL,
+            "REDIS_URL": self.REDIS_URL,
+        }
+        missing = [name for name, value in required.items() if not value or value in placeholders]
+        if missing:
+            raise ValueError(
+                f"Production/staging configuration requires real values for: {', '.join(missing)}"
+            )
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env",

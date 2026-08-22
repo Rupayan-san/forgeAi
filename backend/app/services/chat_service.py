@@ -1,4 +1,5 @@
 import re
+import time
 from datetime import datetime, timezone
 from typing import Optional
 from bson import ObjectId
@@ -11,6 +12,7 @@ from app.models.chat import ChatMessageModel, SourceCitation
 from app.services.project_context_service import ProjectContextService
 from app.services.memory_service import ProjectMemoryService
 from app.services.decision_service import DecisionService
+from app.telemetry.metrics import metrics
 
 
 class ChatService:
@@ -132,6 +134,7 @@ PROJECT CONTEXT:
 
         # 3. Generate completion with OpenAI
         trace.append("Generating response with GPT-4o-mini...")
+        llm_started = time.perf_counter()
         try:
             openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
             completion = await openai_client.chat.completions.create(
@@ -141,9 +144,23 @@ PROJECT CONTEXT:
                 max_tokens=1024,
             )
             assistant_content = completion.choices[0].message.content or "I processed your request."
-        except Exception as err:
-            trace.append(f"AI generation fallback: {err}")
-            assistant_content = f"Hello! I am {ai.name}, your {ai.role}. I reviewed our Project Constitution and memory for: '{user_message}'."
+            usage = completion.usage
+            metrics.record_llm_call(
+                model="gpt-4o-mini",
+                operation="project_chat",
+                status="success",
+                duration_seconds=time.perf_counter() - llm_started,
+                prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+                completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
+            )
+        except Exception:
+            metrics.record_llm_call(
+                model="gpt-4o-mini",
+                operation="project_chat",
+                status="error",
+                duration_seconds=time.perf_counter() - llm_started,
+            )
+            raise
 
         # 4. Persist assistant message
         assistant_msg = ChatMessageModel(

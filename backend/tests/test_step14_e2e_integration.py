@@ -46,7 +46,52 @@ async def client(mock_db):
 
 
 @pytest.mark.asyncio
-async def test_complete_e2e_integrated_user_journey(mock_db, client):
+async def test_project_isolation_across_structured_context(mock_db):
+    """Project A context must not contain Project B Mongo-backed knowledge."""
+    project_a = ProjectModel(
+        project_id="proj_isolation_a",
+        name="Project A",
+        owner_id="user_a",
+        members=["user_a"],
+        qdrant_collection_name="forge_isolation_a",
+        ai_config=ProjectAIConfig(name="Forge"),
+    )
+    project_b = ProjectModel(
+        project_id="proj_isolation_b",
+        name="Project B",
+        owner_id="user_b",
+        members=["user_b"],
+        qdrant_collection_name="forge_isolation_b",
+        ai_config=ProjectAIConfig(name="Forge"),
+    )
+    await mock_db["projects"].insert_many([project_a.model_dump(by_alias=True), project_b.model_dump(by_alias=True)])
+    await mock_db["decisions"].insert_many([
+        DecisionModel(
+            decision_id="decision_a_only",
+            project_id=project_a.project_id,
+            decision_text="Project A uses Atlas for its unique storage boundary.",
+            status=DecisionStatus.ACTIVE.value,
+            recorded_by="user_a",
+        ).model_dump(by_alias=True),
+        DecisionModel(
+            decision_id="decision_b_only",
+            project_id=project_b.project_id,
+            decision_text="Project B uses Nimbus for its unique storage boundary.",
+            status=DecisionStatus.ACTIVE.value,
+            recorded_by="user_b",
+        ).model_dump(by_alias=True),
+    ])
+
+    context_a = await AdvancedRetrievalService().retrieve_and_orchestrate(
+        project_a, "What storage boundary did we choose?", mock_db
+    )
+    assert "Nimbus" not in context_a.formatted_context
+    assert "Atlas" in context_a.formatted_context
+    assert all(doc.get("project_id") == project_a.project_id for doc in context_a.retrieved_documents)
+
+
+@pytest.mark.asyncio
+async def test_complete_e2e_integrated_user_journey(mock_db, client, monkeypatch):
     """
     COMPLETE END-TO-END INTEGRATION TEST (Flows A through K)
     Simulates a full real-world user and team lifecycle across all Forge capabilities:
@@ -61,6 +106,22 @@ async def test_complete_e2e_integrated_user_journey(mock_db, client):
     9. Observability & Telemetry Verification (Flow J)
     10. Failure Isolation & Graceful Degradation (Flow K)
     """
+
+    from types import SimpleNamespace
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="Qdrant is the selected vector database."))],
+                usage=SimpleNamespace(prompt_tokens=20, completion_tokens=10, total_tokens=30),
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    # Explicit provider seam for this deterministic integration fixture.
+    monkeypatch.setattr("app.services.meeting_ai_service.AsyncOpenAI", FakeOpenAI)
 
     # =========================================================================
     # FLOW A: Authentication & Access Control

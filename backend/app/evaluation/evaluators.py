@@ -1,3 +1,4 @@
+import re
 from typing import Any, Optional
 
 
@@ -19,6 +20,61 @@ class RAGEvaluator:
 
         overlap = retrieved_set.intersection(expected_set)
         return len(overlap) / len(expected_set)
+
+    @staticmethod
+    def evaluate_retrieval(
+        retrieved_documents: list[dict[str, Any]],
+        expected_source_types: list[str],
+        expected_source_ids: Optional[list[str]] = None,
+        k: Optional[int] = None,
+    ) -> dict[str, float]:
+        """Score the actual ranked retrieval list, never the generated answer."""
+        ranked = retrieved_documents[:k] if k else retrieved_documents
+        expected_ids = {value.lower() for value in (expected_source_ids or [])}
+        expected_types = {value.lower() for value in expected_source_types}
+        expected_count = len(expected_ids or expected_types)
+        if not expected_count:
+            return {"precision_at_k": 1.0, "recall_at_k": 1.0, "mrr": 1.0}
+
+        def is_relevant(document: dict[str, Any]) -> bool:
+            source_id = str(document.get("source_id", "")).lower()
+            source_type = str(document.get("source_type", "")).lower()
+            return (source_id in expected_ids if expected_ids else source_type in expected_types)
+
+        relevant_count = sum(1 for document in ranked if is_relevant(document))
+        first_rank = next((index for index, document in enumerate(ranked, start=1) if is_relevant(document)), None)
+        return {
+            "precision_at_k": relevant_count / max(1, len(ranked)),
+            "recall_at_k": min(1.0, relevant_count / expected_count),
+            "mrr": 1.0 / first_rank if first_rank else 0.0,
+        }
+
+    @staticmethod
+    def evaluate_answer(
+        answer_text: str,
+        retrieved_documents: list[dict[str, Any]],
+        expected_keywords: list[str],
+        reference_answer: Optional[str] = None,
+    ) -> dict[str, float]:
+        """Evaluate an actual answer against evidence and optional ground truth."""
+        answer = answer_text or ""
+        evidence = " ".join(str(document.get("content", "")) for document in retrieved_documents)
+        keyword_score = RAGEvaluator.evaluate_groundedness_and_keywords(answer, expected_keywords)
+        evidence_terms = set(re.findall(r"[a-z0-9_/-]+", evidence.lower()))
+        answer_terms = set(re.findall(r"[a-z0-9_/-]+", answer.lower()))
+        groundedness = len(answer_terms & evidence_terms) / max(1, len(answer_terms))
+        reference_terms = set(re.findall(r"[a-z0-9_/-]+", (reference_answer or "").lower()))
+        correctness = (
+            len(answer_terms & reference_terms) / max(1, len(reference_terms))
+            if reference_terms
+            else keyword_score
+        )
+        return {
+            "correctness": round(correctness, 4),
+            "relevance": round(keyword_score, 4),
+            "groundedness": round(groundedness, 4),
+            "completeness": round(keyword_score, 4),
+        }
 
     @staticmethod
     def evaluate_groundedness_and_keywords(
@@ -65,6 +121,26 @@ class MeetingEvaluator:
         all_text = " ".join(extracted_actions).lower()
         matched = sum(1 for kw in expected_task_keywords if kw.lower() in all_text)
         return matched / len(expected_task_keywords)
+
+    @staticmethod
+    def _f1(extracted: list[str], expected: list[str]) -> dict[str, float]:
+        extracted_set = {value.strip().lower() for value in extracted if value.strip()}
+        expected_set = {value.strip().lower() for value in expected if value.strip()}
+        true_positives = len(extracted_set & expected_set)
+        precision = true_positives / max(1, len(extracted_set))
+        recall = true_positives / max(1, len(expected_set))
+        f1 = 2 * precision * recall / max(1e-9, precision + recall)
+        return {"precision": round(precision, 4), "recall": round(recall, 4), "f1": round(f1, 4)}
+
+    @staticmethod
+    def evaluate_decision_f1(extracted_decisions: list[str], expected_decisions: list[str]) -> dict[str, float]:
+        """Compute exact normalized precision/recall/F1 when meeting ground truth exists."""
+        return MeetingEvaluator._f1(extracted_decisions, expected_decisions)
+
+    @staticmethod
+    def evaluate_action_item_f1(extracted_actions: list[str], expected_actions: list[str]) -> dict[str, float]:
+        """Compute exact normalized precision/recall/F1 for committed actions."""
+        return MeetingEvaluator._f1(extracted_actions, expected_actions)
 
 
 class ProjectIntelligenceEvaluator:

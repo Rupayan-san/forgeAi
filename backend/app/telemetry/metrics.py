@@ -102,6 +102,9 @@ class ForgeMetrics:
                 self.llm_tokens_total.labels(model=model, token_type="prompt").inc(prompt_tokens)
             if completion_tokens > 0:
                 self.llm_tokens_total.labels(model=model, token_type="completion").inc(completion_tokens)
+            total_tokens = prompt_tokens + completion_tokens
+            if total_tokens > 0:
+                self.llm_tokens_total.labels(model=model, token_type="total").inc(total_tokens)
         except Exception:
             pass
 

@@ -97,15 +97,10 @@ class MeetingSummaryService:
                 raw = raw.rsplit("```", 1)[0]
 
             data = json.loads(raw)
-        except Exception as e:
-            print(f"[MeetingSummaryService] LLM summarization fallback: {e}")
-            data = {
-                "overview": f"Summary for meeting: {meeting.title}",
-                "key_points": [full_transcript_text[:200]],
-                "decisions": [],
-                "action_items": [],
-                "unresolved_questions": [],
-            }
+        except Exception:
+            # A failed provider call must not be presented as generated
+            # meeting intelligence. Callers can retry the operation.
+            raise
 
         # 3. Persist MeetingSummaryModel
         summary = MeetingSummaryModel(

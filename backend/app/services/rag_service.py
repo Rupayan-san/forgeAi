@@ -5,6 +5,7 @@ and Project Memory vector chunks with strict project isolation and source citati
 """
 
 from datetime import datetime, timezone
+import time
 from bson import ObjectId
 
 from openai import AsyncOpenAI
@@ -14,6 +15,8 @@ from app.core.config import settings
 from app.models.project import ProjectModel
 from app.models.chat import ChatMessageModel, SourceCitation
 from app.services.project_context_service import ProjectContextService
+from app.telemetry.metrics import metrics
+from app.telemetry.tracing import trace_span
 
 
 SYSTEM_PROMPT = """You are Forge AI — an intelligent project knowledge assistant. You answer questions about a software project grounded strictly in the project context below, which includes the Project Constitution, active team Decisions, source code files, and communications.
@@ -49,6 +52,7 @@ class RAGService:
         interface_type: str = "text",
     ) -> dict:
         """Full RAG pipeline: ProjectContext assembly → generate answer → save history."""
+        request_start = time.perf_counter()
         trace: list[str] = []
 
         # 1. Fetch project model
@@ -66,11 +70,13 @@ class RAGService:
 
         # 2. Build unified project context
         trace.append("Retrieving Project Constitution, active Decisions, and Memory chunks...")
-        context_result = await self.context_service.build_project_context(
-            project=project,
-            query_text=user_message,
-            db=db,
-        )
+        with trace_span("Forge request", {"project_id": project_id, "interface": interface_type}):
+            with trace_span("context retrieval", {"project_id": project_id}):
+                context_result = await self.context_service.build_project_context(
+                    project=project,
+                    query_text=user_message,
+                    db=db,
+                )
         sources: list[SourceCitation] = context_result.citations
         trace.extend(context_result.trace)
         trace.append(f"Assembled context with {len(sources)} verified source citations")
@@ -106,12 +112,33 @@ class RAGService:
 
         # 5. Call GPT-4o-mini
         trace.append("Generating grounded answer with gpt-4o-mini...")
-        completion = await self.openai.chat.completions.create(
-            model=self.generation_model,
-            messages=messages,
-            temperature=0.3,
-            max_tokens=1024,
-        )
+        llm_start = time.perf_counter()
+        usage = None
+        with trace_span("LLM", {"model": self.generation_model, "project_id": project_id}):
+            try:
+                completion = await self.openai.chat.completions.create(
+                    model=self.generation_model,
+                    messages=messages,
+                    temperature=0.3,
+                    max_tokens=1024,
+                )
+                usage = completion.usage
+                metrics.record_llm_call(
+                    model=self.generation_model,
+                    operation="rag_query",
+                    status="success",
+                    duration_seconds=time.perf_counter() - llm_start,
+                    prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+                    completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
+                )
+            except Exception:
+                metrics.record_llm_call(
+                    model=self.generation_model,
+                    operation="rag_query",
+                    status="error",
+                    duration_seconds=time.perf_counter() - llm_start,
+                )
+                raise
         assistant_content = completion.choices[0].message.content or "I processed your request."
         trace.append("Answer generated and cited")
 
@@ -134,4 +161,18 @@ class RAGService:
             "sources": [s.model_dump() for s in sources],
             "created_at": assistant_msg.created_at,
             "trace": trace,
+            "retrieved_documents": context_result.retrieved_documents,
+            "retrieval_stats": context_result.retrieval_stats,
+            "timings_ms": {
+                **context_result.timings_ms,
+                "llm": round((time.perf_counter() - llm_start) * 1000.0, 3),
+                "total": round((time.perf_counter() - request_start) * 1000.0, 3),
+            },
+            "usage": {
+                "prompt_tokens": getattr(usage, "prompt_tokens", None) if usage else None,
+                "completion_tokens": getattr(usage, "completion_tokens", None) if usage else None,
+                "total_tokens": getattr(usage, "total_tokens", None) if usage else None,
+                "cost_usd": None,
+                "cost_status": "unavailable",
+            },
         }

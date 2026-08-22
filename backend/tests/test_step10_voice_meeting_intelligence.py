@@ -272,10 +272,35 @@ async def test_meeting_websocket_broadcast_and_ai_state():
 
 
 @pytest.mark.asyncio
-async def test_e2e_18_step_meeting_to_rag_scenario(mock_db, alice, bob):
+async def test_e2e_18_step_meeting_to_rag_scenario(mock_db, alice, bob, monkeypatch):
     """Full End-to-End 18-step integration test:
     Project -> Meeting -> Join -> Transcripts -> Voice Invocation -> Decisions -> Actions -> End -> Summary -> Memory -> Advanced RAG.
     """
+    from types import SimpleNamespace
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            prompt = " ".join(message.get("content", "") for message in kwargs.get("messages", []))
+            content = (
+                '{"overview":"The team reviewed caching and agreed on Redis.",'
+                '"key_points":["Caching strategy was discussed"],'
+                '"decisions":["Adopt Redis for real-time caching and session management."],'
+                '"action_items":["Implement Redis caching layer"],"unresolved_questions":[]}'
+                if "valid JSON" in prompt
+                else "The constitution requires the documented architecture rules."
+            )
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+                usage=SimpleNamespace(prompt_tokens=20, completion_tokens=10, total_tokens=30),
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr("app.services.meeting_ai_service.AsyncOpenAI", FakeOpenAI)
+    monkeypatch.setattr("app.services.meeting_summary_service.AsyncOpenAI", FakeOpenAI)
+
     project_id = "step10_e2e_project"
     meeting_service = MeetingService()
     summary_service = MeetingSummaryService()

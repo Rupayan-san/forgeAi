@@ -11,9 +11,11 @@ from app.services.retrieval.dense_retriever import DenseRetriever
 from app.services.retrieval.sparse_retriever import SparseRetriever
 from app.services.retrieval.structured_retriever import StructuredRetriever, StructuredRetrievalResult
 from app.services.retrieval.rank_fusion import RRFusion
-from app.services.retrieval.reranker import CrossEncoderReranker
+from app.services.retrieval.reranker import WeightedReranker
 from app.services.retrieval.diversifier import MMRDiversifier
 from app.services.retrieval.context_builder import ContextBuilder
+from app.telemetry.metrics import metrics
+from app.telemetry.tracing import trace_span
 
 
 class AdvancedRetrievalService:
@@ -26,7 +28,7 @@ class AdvancedRetrievalService:
         self.sparse_retriever = SparseRetriever(self.config)
         self.structured_retriever = StructuredRetriever(self.config)
         self.fusion = RRFusion(self.config)
-        self.reranker = CrossEncoderReranker(self.config)
+        self.reranker = WeightedReranker(self.config)
         self.diversifier = MMRDiversifier(self.config)
         self.context_builder = ContextBuilder(self.config)
 
@@ -39,10 +41,14 @@ class AdvancedRetrievalService:
     ) -> ProjectContextResult:
         """Execute the full retrieval pipeline: Plan → Retrieve → Fuse → Rerank → MMR → Assemble."""
         start_time = time.perf_counter()
+        timings_ms: dict[str, float] = {}
         trace: list[str] = []
 
         # 1. Query Analysis & Planning
-        plan: RetrievalPlan = self.planner.plan(query)
+        planning_start = time.perf_counter()
+        with trace_span("query processing", {"project_id": project.project_id}):
+            plan: RetrievalPlan = self.planner.plan(query)
+        timings_ms["query_processing"] = (time.perf_counter() - planning_start) * 1000.0
         trace.append(f"Query plan: intent={plan.intent.value}, variants={len(plan.query_variants)}, exact_terms={plan.exact_terms}")
 
         collection_name = project.qdrant_collection_name or f"forge_{project.project_id}"
@@ -94,36 +100,45 @@ class AdvancedRetrievalService:
                 print(f"[AdvancedRetrieval] Structured retrieval warning: {e}")
                 return StructuredRetrievalResult()
 
-        dense_res, structured_res = await asyncio.gather(
-            fetch_dense(),
-            fetch_structured(),
-            return_exceptions=False,
-        )
+        retrieval_start = time.perf_counter()
+        with trace_span("retrieval", {"project_id": project.project_id}):
+            dense_res, structured_res = await asyncio.gather(
+                fetch_dense(),
+                fetch_structured(),
+                return_exceptions=False,
+            )
 
-        sparse_res = await fetch_sparse(dense_candidates=dense_res)
+            sparse_res = await fetch_sparse(dense_candidates=dense_res)
+        timings_ms["retrieval"] = (time.perf_counter() - retrieval_start) * 1000.0
 
         trace.append(f"Retrieved: {len(dense_res)} dense candidates, {len(sparse_res)} sparse candidates")
 
         # 3. Reciprocal Rank Fusion (RRF)
-        ranked_lists = [
-            (dense_res, self.config.dense_weight),
-            (sparse_res, self.config.sparse_weight),
-        ]
-        fused_candidates = self.fusion.fuse(
-            ranked_lists=ranked_lists,
-            top_k=self.config.dense_top_k + self.config.sparse_top_k,
-        )
+        fusion_start = time.perf_counter()
+        with trace_span("fusion", {"project_id": project.project_id}):
+            ranked_lists = [
+                (dense_res, self.config.dense_weight),
+                (sparse_res, self.config.sparse_weight),
+            ]
+            fused_candidates = self.fusion.fuse(
+                ranked_lists=ranked_lists,
+                top_k=self.config.dense_top_k + self.config.sparse_top_k,
+            )
+        timings_ms["fusion"] = (time.perf_counter() - fusion_start) * 1000.0
         trace.append(f"Fused {len(fused_candidates)} candidates via RRF (k={self.config.fusion_k})")
 
         # 4. Reranking
-        reranked_candidates = await self.reranker.rerank(
-            query=plan.normalized_query,
-            candidates=fused_candidates,
-            exact_terms=plan.exact_terms,
-            is_temporal=plan.is_temporal,
-            temporal_dir=plan.temporal_direction,
-            top_k=self.config.rerank_top_k,
-        )
+        rerank_start = time.perf_counter()
+        with trace_span("reranking", {"project_id": project.project_id}):
+            reranked_candidates = await self.reranker.rerank(
+                query=plan.normalized_query,
+                candidates=fused_candidates,
+                exact_terms=plan.exact_terms,
+                is_temporal=plan.is_temporal,
+                temporal_dir=plan.temporal_direction,
+                top_k=self.config.rerank_top_k,
+            )
+        timings_ms["reranking"] = (time.perf_counter() - rerank_start) * 1000.0
         trace.append(f"Reranked top {len(reranked_candidates)} candidates")
 
         # 5. Deduplication & MMR Diversification
@@ -135,14 +150,66 @@ class AdvancedRetrievalService:
         trace.append(f"MMR selected {len(final_chunks)} diverse final chunks (lambda={self.config.mmr_lambda})")
 
         # 6. Context Assembly & Budgeting
-        result = self.context_builder.build_context(
-            project=project,
-            query=query,
-            intent=plan.intent,
-            structured_data=structured_res,
-            memory_chunks=final_chunks,
-            trace=trace,
+        context_start = time.perf_counter()
+        with trace_span("context construction", {"project_id": project.project_id}):
+            result = self.context_builder.build_context(
+                project=project,
+                query=query,
+                intent=plan.intent,
+                structured_data=structured_res,
+                memory_chunks=final_chunks,
+                trace=trace,
+            )
+        timings_ms["context_construction"] = (time.perf_counter() - context_start) * 1000.0
+
+        result.timings_ms = {key: round(value, 3) for key, value in timings_ms.items()}
+        result.timings_ms["total_retrieval_pipeline"] = round((time.perf_counter() - start_time) * 1000.0, 3)
+        result.retrieved_documents = [
+            {
+                "memory_id": item.memory_id,
+                "project_id": item.project_id,
+                "source_type": item.source_type,
+                "source_id": item.source_id,
+                "content": item.content,
+                "metadata": item.metadata,
+                "relevance_score": item.relevance_score,
+            }
+            for item in final_chunks
+        ]
+        if structured_res.has_constitution:
+            result.retrieved_documents.insert(0, {
+                "project_id": project.project_id,
+                "source_type": "constitution",
+                "source_id": f"constitution:{project.project_id}",
+                "content": structured_res.constitution_markdown,
+                "metadata": {},
+                "relevance_score": 1.0,
+            })
+        result.retrieved_documents.extend(
+            {
+                "project_id": project.project_id,
+                "source_type": "decision",
+                "source_id": decision.decision_id,
+                "content": decision.decision_text,
+                "metadata": {},
+                "relevance_score": decision.confidence_score,
+            }
+            for decision in structured_res.decisions
         )
+        result.retrieval_stats = {
+            "dense_candidates": len(dense_res),
+            "sparse_candidates": len(sparse_res),
+            "fused_candidates": len(fused_candidates),
+            "reranked_candidates": len(reranked_candidates),
+            "final_documents": len(result.retrieved_documents),
+        }
+        for source_type in {doc["source_type"] for doc in result.retrieved_documents}:
+            metrics.record_retrieval(
+                source_type=source_type,
+                status="success",
+                duration_seconds=timings_ms["retrieval"] / 1000.0,
+                doc_count=sum(1 for doc in result.retrieved_documents if doc["source_type"] == source_type),
+            )
 
         elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
         result.trace.append(f"Advanced RAG pipeline completed in {elapsed_ms}ms")

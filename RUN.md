@@ -12,6 +12,9 @@ From the project root, start all services (Backend, RQ Worker, Discord Bot, and 
 ```bash
 python start_all.py
 ```
+
+To start installed Prometheus, Grafana, and OpenTelemetry Collector binaries
+as real child processes, use `python start_all.py --with-observability`.
 *Or on Windows, simply double-click or run `start.bat` / `.\start.ps1`.*
 
 Press `Ctrl + C` in the terminal to stop all services simultaneously.

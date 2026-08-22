@@ -148,8 +148,23 @@ async def test_send_and_get_chat_messages_rest(client, sample_project, sample_me
 
 
 @pytest.mark.asyncio
-async def test_ai_invocation_in_chat_triggers_ai_response(client, mock_db, sample_project, sample_member):
+async def test_ai_invocation_in_chat_triggers_ai_response(client, mock_db, sample_project, sample_member, monkeypatch):
     """Invoking AI in chat generates and persists an assistant response grounded in Project Constitution."""
+    from types import SimpleNamespace
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="Use the service layer for MongoDB access."))],
+                usage=SimpleNamespace(prompt_tokens=20, completion_tokens=10, total_tokens=30),
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    # Explicit test seam: production ChatService propagates provider failures.
+    monkeypatch.setattr("app.services.chat_service.AsyncOpenAI", FakeOpenAI)
     # Set up constitution first
     await mock_db["project_constitutions"].insert_one({
         "project_id": sample_project.project_id,

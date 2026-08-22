@@ -55,3 +55,9 @@ class ProjectContextResult(BaseModel):
     citations: list[SourceCitation] = Field(default_factory=list)
     orchestration_intent: str = QueryIntent.MULTI_SOURCE.value
     trace: list[str] = Field(default_factory=list)
+    # Measured timings and the exact documents selected by the real retrieval
+    # pipeline. These fields are intentionally part of the internal result so
+    # evaluation and observability cannot reconstruct synthetic answers.
+    timings_ms: dict[str, float] = Field(default_factory=dict)
+    retrieved_documents: list[dict[str, Any]] = Field(default_factory=list)
+    retrieval_stats: dict[str, int] = Field(default_factory=dict)

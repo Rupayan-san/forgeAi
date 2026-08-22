@@ -9,6 +9,8 @@ class EvaluationExample(BaseModel):
     query: str
     expected_answer_keywords: list[str] = Field(default_factory=list)
     expected_sources: list[str] = Field(default_factory=list)
+    expected_source_ids: list[str] = Field(default_factory=list)
+    expected_relevant_information: list[str] = Field(default_factory=list)
     reference_answer: Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -82,6 +84,53 @@ def get_benchmark_dataset() -> EvaluationDataset:
             expected_answer_keywords=["block", "overdue", "risk"],
             expected_sources=["action_item", "project_risk"],
             reference_answer="The risk analyzer inspects overdue action items and blocked flags with source traceability.",
+            metadata={"difficulty": "medium"},
+        ),
+        EvaluationExample(
+            example_id="eval_constitution_api_conventions",
+            category="constitution",
+            query="What API conventions are authoritative for this project?",
+            expected_answer_keywords=["constitution", "API"],
+            expected_sources=["constitution"],
+            expected_relevant_information=["authoritative project rules"],
+            reference_answer="The Project Constitution is the authoritative source for project API conventions.",
+            metadata={"difficulty": "easy"},
+        ),
+        EvaluationExample(
+            example_id="eval_memory_architecture",
+            category="memory",
+            query="What project memory says why Qdrant is used?",
+            expected_answer_keywords=["Qdrant", "project", "memory"],
+            expected_sources=["decision", "chat_message", "constitution"],
+            reference_answer="Project memory records Qdrant as the project-isolated vector store.",
+            metadata={"difficulty": "medium"},
+        ),
+        EvaluationExample(
+            example_id="eval_github_auth_changes",
+            category="github",
+            query="What changed in authentication recently in GitHub?",
+            expected_answer_keywords=["authentication", "change"],
+            expected_sources=["github_commit", "github_pr", "github_file"],
+            reference_answer=None,
+            metadata={"difficulty": "hard", "temporal": "recent"},
+        ),
+        EvaluationExample(
+            example_id="eval_temporal_recent_state",
+            category="temporal",
+            query="What is the most recent project state and what changed last?",
+            expected_answer_keywords=["recent", "state"],
+            expected_sources=["project_state", "github_commit", "github_pr"],
+            reference_answer=None,
+            metadata={"difficulty": "hard", "temporal": "recent"},
+        ),
+        EvaluationExample(
+            example_id="eval_source_attribution_qdrant",
+            category="source_attribution",
+            query="Which sources support the decision to use Qdrant?",
+            expected_answer_keywords=["Qdrant", "source"],
+            expected_sources=["decision", "constitution"],
+            expected_relevant_information=["Qdrant"],
+            reference_answer="The Qdrant decision is supported by the project decision record and constitution.",
             metadata={"difficulty": "medium"},
         ),
     ]

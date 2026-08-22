@@ -17,7 +17,7 @@ from app.services.retrieval.query_planner import (
 )
 from app.services.retrieval.sparse_retriever import BM25Scorer, SparseRetriever
 from app.services.retrieval.rank_fusion import RRFusion
-from app.services.retrieval.reranker import CrossEncoderReranker
+from app.services.retrieval.reranker import WeightedReranker
 from app.services.retrieval.diversifier import DeterministicDeduplicator, MMRDiversifier
 from app.services.retrieval.context_builder import ContextBuilder
 from app.services.retrieval.structured_retriever import StructuredRetriever
@@ -168,7 +168,7 @@ def test_rrf_fusion():
 @pytest.mark.asyncio
 async def test_cross_encoder_reranker_and_authority():
     """Verify reranker applies source authority and exact symbol boosting."""
-    reranker = CrossEncoderReranker()
+    reranker = WeightedReranker()
     item_chat = MemoryItem(
         memory_id="1",
         project_id="p1",

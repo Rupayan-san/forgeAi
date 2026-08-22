@@ -117,8 +117,20 @@ def test_rag_and_meeting_evaluators():
 
 @pytest.mark.asyncio
 async def test_evaluation_runner_and_regression_detection():
-    """Verify full evaluation run computes percentiles, tokens, and regression comparisons."""
-    runner = EvaluationRunner()
+    """Unit-test scoring with an explicit injected response; production runner uses RAGService."""
+    async def unit_request(example):
+        return {
+            "content": example.reference_answer or "Qdrant active project decisions actions",
+            "sources": [{"source_type": source, "source_id": f"{source}:fixture"} for source in example.expected_sources],
+            "retrieved_documents": [
+                {"source_type": source, "source_id": f"{source}:fixture", "content": example.reference_answer or "Qdrant active project decisions actions"}
+                for source in example.expected_sources
+            ],
+            "timings_ms": {"retrieval": 1.0, "llm": 2.0, "total": 3.0},
+            "usage": {"total_tokens": 10, "cost_usd": None},
+        }
+
+    runner = EvaluationRunner(request_fn=unit_request)
     report = await runner.run_evaluation()
 
     assert report.total_examples > 0
@@ -132,13 +144,24 @@ async def test_evaluation_runner_and_regression_detection():
 
     # Test regression detection against a high baseline
     baseline_high = {"average_groundedness": 1.0}
-    runner_reg = EvaluationRunner()
+    runner_reg = EvaluationRunner(request_fn=unit_request)
     # Force low score
     runner_reg.dataset.examples[0].expected_answer_keywords = ["NonExistentImpossibleKeyword12345"]
     report_reg = await runner_reg.run_evaluation(baseline_report=baseline_high)
 
     assert report_reg.has_regressions is True
     assert len(report_reg.regression_details) > 0
+
+
+@pytest.mark.asyncio
+async def test_real_evaluation_never_fabricates_without_pipeline_context():
+    """The production runner reports NOT_TESTED instead of constructing an answer."""
+    runner = EvaluationRunner()
+    report = await runner.run_evaluation()
+
+    assert report.not_tested_examples == report.total_examples
+    assert report.total_tokens == 0
+    assert all(item.status == "NOT_TESTED" for item in report.results)
 
 
 def test_observability_failure_isolation():
