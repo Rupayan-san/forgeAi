@@ -349,6 +349,7 @@ class GitHubIngestionService:
 
             # 3. Vector Embed and Index Files
             file_chunks_count = 0
+            file_embedding_errors: list[str] = []
             for relative_path, file_content in files_to_process:
                 try:
                     metadata = {
@@ -379,6 +380,13 @@ class GitHubIngestionService:
                             file_chunks_count += len(summary_points)
                 except Exception as e:
                     print(f"Error embedding file {relative_path}: {e}")
+                    file_embedding_errors.append(f"{relative_path}: {e}")
+
+            if file_embedding_errors:
+                raise RuntimeError(
+                    f"Failed to embed {len(file_embedding_errors)} GitHub file(s): "
+                    + "; ".join(file_embedding_errors[:5])
+                )
 
             # 4. Ingest Commits & Pull Requests
             commit_chunks_count, latest_commit_sha = await self._ingest_commits(repo_name, collection_name)
