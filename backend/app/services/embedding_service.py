@@ -1,6 +1,6 @@
 import uuid
 import hashlib
-from typing import Any
+from typing import Any, Optional
 
 from openai import AsyncOpenAI
 from app.core.config import settings
@@ -20,6 +20,65 @@ class EmbeddingService:
 
     def _get_cache_key(self, text: str) -> str:
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def chunk_text(self, text: str) -> list[str]:
+        """Split text into overlapping, approximately token-sized chunks.
+
+        The service intentionally uses a character approximation instead of a
+        provider-specific tokenizer: four characters is close enough for the
+        ingestion budget and keeps code, markdown, and configuration files
+        dependency-free. Chunks prefer a newline or whitespace boundary when
+        one is available so source snippets remain readable.
+        """
+        normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+        if not normalized:
+            return []
+
+        max_chars = max(1, self.chunk_size * 4)
+        overlap_chars = max(0, min(max_chars - 1, self.chunk_overlap * 4))
+        if len(normalized) <= max_chars:
+            return [normalized]
+
+        chunks: list[str] = []
+        start = 0
+        while start < len(normalized):
+            proposed_end = min(start + max_chars, len(normalized))
+            end = proposed_end
+
+            if proposed_end < len(normalized):
+                # Keep at least half a chunk before accepting a boundary. This
+                # prevents a dense file with frequent short lines from making
+                # thousands of tiny chunks.
+                boundary_floor = start + max_chars // 2
+                newline_boundary = normalized.rfind("\n", boundary_floor, proposed_end)
+                space_boundary = normalized.rfind(" ", boundary_floor, proposed_end)
+                boundary = max(newline_boundary, space_boundary)
+                if boundary > start:
+                    end = boundary
+
+            chunk = normalized[start:end].strip()
+            if chunk:
+                chunks.append(chunk)
+
+            if end >= len(normalized):
+                break
+
+            next_start = end - overlap_chars
+            # Ensure malformed configuration values cannot create an infinite
+            # loop even if chunk_size/overlap are changed at runtime.
+            start = max(start + 1, next_start)
+
+        return chunks
+
+    @staticmethod
+    def generate_chunk_id(source_type: str, source_id: str, chunk_index: int) -> str:
+        """Return a stable UUID for one logical source chunk.
+
+        Stable IDs make repository re-ingestion idempotent: the same file,
+        source type, and chunk index upsert the same Qdrant point.
+        """
+        identity = f"forge:{source_type}:{source_id}:{chunk_index}"
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, identity))
 
     async def generate_embeddings(self, texts: list[str]) -> list[list[float]]:
         """Generate 1536-dimensional embeddings for a list of texts with in-memory caching and offline fallback."""

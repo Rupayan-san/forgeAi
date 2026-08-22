@@ -6,7 +6,8 @@ scrape_configs:
   - job_name: "forge_backend"
     metrics_path: "/metrics"
     static_configs:
-      - targets: ["localhost:8000"]
+      # The backend is a Compose service, so use the internal DNS name.
+      - targets: ["backend:8000"]
         labels:
           service: "forge-api"
           env: "development"

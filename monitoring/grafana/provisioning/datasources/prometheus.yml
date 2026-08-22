@@ -4,6 +4,7 @@ datasources:
   - name: Prometheus
     type: prometheus
     access: proxy
-    url: http://localhost:9090
+    # Grafana runs in Docker and reaches Prometheus over the Compose network.
+    url: http://prometheus:9090
     isDefault: true
     editable: false
