@@ -54,25 +54,26 @@ class ApiClient {
     }
 
     if (!res.ok) {
-      const error = await res.json().catch(() => ({ detail: res.statusText }));
-      if (res.status === 401) {
-        // Only clear auth state when verifying identity fails (e.g. /auth/me).
-        // A 401 on a regular endpoint should NOT wipe the user's session —
-        // the token may still be valid but the backend was temporarily unreachable
-        // or a new endpoint isn't deployed yet.
-        const isAuthEndpoint = endpoint.startsWith("/auth/");
-        if (isAuthEndpoint) {
-          this.setToken(null);
-          if (typeof window !== "undefined") {
-            try {
-              localStorage.removeItem("forge-auth");
-            } catch {}
-          }
+      let error: any = {};
+      try {
+        error = await res.json();
+      } catch {
+        error = { detail: res.statusText || `HTTP Error ${res.status}` };
+      }
+
+      if (res.status === 401 || (endpoint.startsWith("/auth/") && (res.status === 403 || res.status === 404))) {
+        // Clear auth state on auth check failures
+        this.setToken(null);
+        if (typeof window !== "undefined") {
+          try {
+            localStorage.removeItem("forge-auth");
+            localStorage.removeItem("token");
+          } catch {}
         }
       } else {
         console.error(`[ApiClient Error] ${res.status} on ${endpoint}:`, error);
       }
-      throw new Error(error.detail || `API request failed with status ${res.status}`);
+      throw new Error(error?.detail || error?.message || `API request failed with status ${res.status}`);
     }
     return res.json();
   }

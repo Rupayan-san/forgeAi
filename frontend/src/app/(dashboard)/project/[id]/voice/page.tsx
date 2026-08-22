@@ -166,7 +166,7 @@ export default function VoiceMeetingPage() {
       setIsMuted(false);
       try {
         recognitionRef.current.start();
-      } catch (e) {}
+      } catch (e) { }
     } else {
       setIsMuted(true);
       recognitionRef.current.stop();
@@ -180,7 +180,7 @@ export default function VoiceMeetingPage() {
     if (recognitionRef.current) {
       try {
         recognitionRef.current.start();
-      } catch (e) {}
+      } catch (e) { }
     }
   };
 
@@ -258,11 +258,10 @@ export default function VoiceMeetingPage() {
           <div className="flex items-center gap-2.5">
             <button
               onClick={toggleMute}
-              className={`p-2 rounded-md transition-colors cursor-pointer ${
-                isMuted
+              className={`p-2 rounded-md transition-colors cursor-pointer ${isMuted
                   ? "bg-rose-500/20 text-rose-500 border border-rose-500/30"
                   : "bg-secondary text-secondary-foreground hover:bg-accent border border-border"
-              }`}
+                }`}
               title={isMuted ? "Unmute" : "Mute"}
             >
               {isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
@@ -366,19 +365,17 @@ export default function VoiceMeetingPage() {
               transcripts.map((t) => (
                 <div
                   key={t.id}
-                  className={`flex flex-col ${
-                    t.speaker === user?.name || t.speaker === "Me" ? "items-end" : "items-start"
-                  }`}
+                  className={`flex flex-col ${t.speaker === user?.name || t.speaker === "Me" ? "items-end" : "items-start"
+                    }`}
                 >
                   <span className="text-[10px] text-muted-foreground mb-1 px-1">
                     {t.speaker} · {new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                   <div
-                    className={`px-3.5 py-2 rounded-lg max-w-[80%] ${
-                      t.speaker === user?.name || t.speaker === "Me"
+                    className={`px-3.5 py-2 rounded-lg max-w-[80%] ${t.speaker === user?.name || t.speaker === "Me"
                         ? "surface-elevated text-[#fafafa] border border-emerald-500/20"
                         : "surface text-[#a3a3a3]"
-                    } ${!t.isFinal ? "opacity-60 italic" : ""}`}
+                      } ${!t.isFinal ? "opacity-60 italic" : ""}`}
                   >
                     <p className="text-[13px] leading-relaxed whitespace-pre-wrap">{t.text}</p>
                   </div>

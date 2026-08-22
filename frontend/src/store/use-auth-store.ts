@@ -53,12 +53,24 @@ export const useAuthStore = create<AuthState>()(
           set({ user, token, isAuthenticated: true, isLoading: false });
         } catch (err: any) {
           console.warn("Session check returned error:", err);
-          // If explicitly unauthorized (401), clear session
-          if (err?.message?.includes("401") || err?.message?.includes("Unauthorized") || err?.message?.includes("expired")) {
+          // If auth fails (401, unauthorized, invalid user), reset token and clear auth
+          if (
+            err?.message?.includes("401") ||
+            err?.message?.includes("403") ||
+            err?.message?.includes("404") ||
+            err?.message?.includes("Unauthorized") ||
+            err?.message?.includes("expired") ||
+            err?.message?.includes("User not found")
+          ) {
             api.setToken(null);
+            if (typeof window !== "undefined") {
+              try {
+                localStorage.removeItem("forge-auth");
+                localStorage.removeItem("token");
+              } catch {}
+            }
             set({ user: null, token: null, isAuthenticated: false, isLoading: false });
           } else {
-            // Otherwise preserve existing state so network blips do not boot the user out
             set({ isLoading: false });
           }
         }
